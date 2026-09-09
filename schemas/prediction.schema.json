@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/local/earthquake/schemas/prediction.schema.json",
+  "title": "Issued earthquake prediction",
+  "description": "A dated call with a time window, region, and magnitude floor. Used for the fusion, solar-magnetic, and geometry heads.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "prediction_id",
+    "issued_at",
+    "valid_from",
+    "valid_to",
+    "horizon_days",
+    "region",
+    "magnitude_min",
+    "kind",
+    "value",
+    "model_id",
+    "drivers"
+  ],
+  "properties": {
+    "prediction_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_to": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "horizon_days": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["cells", "bbox", "named"]
+        },
+        "cell_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "min_lon": { "type": "number" },
+        "max_lon": { "type": "number" },
+        "min_lat": { "type": "number" },
+        "max_lat": { "type": "number" },
+        "name": { "type": "string" },
+        "label": { "type": "string" }
+      }
+    },
+    "magnitude_min": {
+      "type": "number"
+    },
+    "magnitude_max": {
+      "type": "number"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["alarm", "probability", "ranked_cells"]
+    },
+    "value": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Alarm 0/1 or calibrated probability."
+    },
+    "cell_values": {
+      "type": "array",
+      "description": "For ranked_cells: per-cell probabilities, same order as region.cell_ids.",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1,
+      "examples": [
+        "fusion.tft.v1",
+        "alarm.spf_proton.v1",
+        "alarm.geometry.v1"
+      ]
+    },
+    "drivers": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Terms that entered this call. Fusion contribution is ln(gain). Alarm contribution is 1 for a gate, or tail-depth for anti-prediction.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["driver", "lag_hours", "contribution"],
+        "properties": {
+          "driver": { "type": "string", "minLength": 1 },
+          "lag_hours": { "type": "number" },
+          "contribution": { "type": "number" }
+        }
+      }
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "competitor_etas_p": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "registry_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Pinned model-registry version that produced this card."
+    },
+    "code_hash": {
+      "type": "string",
+      "minLength": 1,
+      "description": "SHA-256 of the feature/predict source that turned the brain into this number."
+    }
+  }
+}

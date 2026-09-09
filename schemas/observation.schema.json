@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/local/earthquake/schemas/observation.schema.json",
+  "title": "Forecast platform observation",
+  "description": "Shared envelope written by every source connector. available_at is the point-in-time gate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "observed_at",
+    "available_at",
+    "geom",
+    "payload",
+    "license",
+    "ingest_run_id"
+  ],
+  "properties": {
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "examples": [
+        "usgs.comcat",
+        "geonet.fdsn",
+        "noaa.swpc.kp",
+        "nasa.omni",
+        "wilcox.spf",
+        "sidc.silso",
+        "computed.tide"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC instant the quantity refers to."
+    },
+    "available_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC instant a forecast issued at this time could have used the record."
+    },
+    "geom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["point", "grid", "global"]
+        },
+        "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+        "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+        "cell_id": { "type": "string" },
+        "min_lon": { "type": "number" },
+        "max_lon": { "type": "number" },
+        "min_lat": { "type": "number" },
+        "max_lat": { "type": "number" }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "description": "Source-native fields plus optional normalized aliases (magnitude, kp, f107, ...)."
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ingest_run_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

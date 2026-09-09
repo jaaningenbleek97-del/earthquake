@@ -1,0 +1,36 @@
+{
+  "type": "Feature",
+  "id": "us0fakeeq01",
+  "properties": {
+    "time": 1577836800000,
+    "place": "off the east coast of Honshu, Japan",
+    "products": {
+      "origin": [
+        {
+          "updateTime": 1577844000000,
+          "status": "UPDATE",
+          "properties": {
+            "magnitude": "6.8",
+            "latitude": "38.0",
+            "longitude": "142.0",
+            "depth": "20",
+            "eventtime": "2020-01-01T00:00:00.000Z",
+            "evaluation-status": "automatic"
+          }
+        },
+        {
+          "updateTime": 1578009600000,
+          "status": "UPDATE",
+          "properties": {
+            "magnitude": "7.4",
+            "latitude": "38.05",
+            "longitude": "142.1",
+            "depth": "18",
+            "eventtime": "2020-01-01T00:00:00.000Z",
+            "evaluation-status": "reviewed"
+          }
+        }
+      ]
+    }
+  }
+}
