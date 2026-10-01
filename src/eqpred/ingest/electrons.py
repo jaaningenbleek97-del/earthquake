@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""GOES integral electrons — leftover radiation-belt / magnetosphere flux.
+"""GOES integral electrons — non-catalog radiation-belt / magnetosphere flux.
 
 Replayable daily rows. Live SWPC JSON covers the tail. NCEI Daily Particle
 Data files sometimes carry electron fluence columns after the proton bands.
@@ -12,6 +12,13 @@ from typing import Any, Iterable
 import pandas as pd
 
 from eqpred.ingest.http import fetch_json, fetch_text
+from eqpred.ingest.protons import (
+    LATENCY_DPD,
+    LATENCY_LIVE,
+    LATENCY_SEISS,
+    fill_missing_available_at,
+    stamp_available_at,
+)
 from eqpred.records import iso
 
 SOURCE = "noaa.goes_electrons"
@@ -218,7 +225,7 @@ def pull_electrons(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> pd.DataFrame:
-    """GOES electrons: DPD extra columns if present, plus SWPC JSON tail."""
+    """GOES electrons: DPD extras + GOES-R SEISS MPS-HI + SWPC JSON tail."""
     print("  NCEI daily particle data (electron columns)", flush=True)
     dpd_parts: list[pd.DataFrame] = []
     for name in DPD_FILES:
@@ -235,6 +242,11 @@ def pull_electrons(
         print(f"    {name} {len(parsed)} electron days", flush=True)
         dpd_parts.append(parsed)
     dpd = pd.concat(dpd_parts, ignore_index=True) if dpd_parts else pd.DataFrame()
+
+    print("  GOES-R SEISS MPS-HI (NCEI L2 avg5m)", flush=True)
+    from eqpred.ingest.seiss import pull_seiss
+
+    seiss = pull_seiss("mpsh", ingest_run_id, start, end)
 
     rows: list[Any] = []
     seen: set[str] = set()
@@ -253,13 +265,16 @@ def pull_electrons(
         fluence_rows.extend(_safe_json(url))
     live_fluence = parse_goes_electron_fluence(fluence_rows)
 
-    daily = combine_electron_frames((dpd, live_fluence, live_flux))
+    dpd = stamp_available_at(dpd, LATENCY_DPD)
+    seiss = stamp_available_at(seiss, LATENCY_SEISS)
+    live_fluence = stamp_available_at(live_fluence, LATENCY_LIVE)
+    live_flux = stamp_available_at(live_flux, LATENCY_LIVE)
+    daily = combine_electron_frames((dpd, seiss, live_fluence, live_flux))
     daily = _in_window(daily, start, end)
     if daily.empty:
         return pd.DataFrame()
     daily["source"] = SOURCE
     daily["ingest_run_id"] = ingest_run_id
     daily["license"] = LICENSE
-    stamp = pd.to_datetime(daily["observed_at"], utc=True)
-    daily["available_at"] = [iso(t.to_pydatetime() + LATENCY) for t in stamp]
+    daily = fill_missing_available_at(daily, LATENCY_LIVE)
     return daily.sort_values("observed_at").reset_index(drop=True)

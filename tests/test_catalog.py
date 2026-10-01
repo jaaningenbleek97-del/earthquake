@@ -170,3 +170,39 @@ def test_nowcast_energy_uses_asof_mag():
     assert float(honest.loc[honest["issue_time"] == early, "log_energy_7d"].iloc[0]) < float(
         leaky.loc[leaky["issue_time"] == early, "log_energy_7d"].iloc[0]
     )
+
+
+def test_bulk_recatalog_stamp_does_not_hide_old_quake():
+    """A 1990 M6.5 re-reviewed in bulk in 2014 must not look unknown until 2014."""
+    t0 = datetime(1990, 1, 4, tzinfo=timezone.utc)
+    bulk = datetime(2014, 11, 7, tzinfo=timezone.utc)
+    quakes = pd.DataFrame(
+        {
+            "event_id": ["usp00043wc"],
+            "observed_at": pd.to_datetime([t0], utc=True),
+            "magnitude": [6.5],
+            "lon": [140.0],
+            "lat": [38.0],
+        }
+    )
+    versions = pd.DataFrame(
+        {
+            "event_id": ["usp00043wc"],
+            "version_at": pd.to_datetime([bulk], utc=True),
+            "observed_at": pd.to_datetime([t0], utc=True),
+            "magnitude": [6.5],
+            "status": ["reviewed"],
+        }
+    )
+    cutoff = pd.Timestamp("1990-02-01T00:00:00Z")
+
+    assert apply_available_at(quakes, versions=versions).iloc[0]["available_at"] < cutoff
+    assert event_available_as(quakes, 6.0, versions).iloc[0] < cutoff
+
+    seen = catalog_asof(
+        quakes,
+        datetime(1990, 6, 1, tzinfo=timezone.utc),
+        versions=versions,
+        apply_mc=False,
+    )
+    assert list(seen["event_id"]) == ["usp00043wc"]

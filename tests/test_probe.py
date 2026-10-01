@@ -16,7 +16,7 @@ def test_shift_rows_is_causal():
 def test_probe_timeshift_kills_planted_m8_and_where_finds_the_box(tmp_path):
     rng = np.random.default_rng(11)
     days = pd.date_range("2014-01-01", periods=2800, freq="D", tz="UTC")
-    # Rare M8-like hits aligned to a leftover knob.
+    # Rare M8-like hits aligned to a non-catalog knob.
     pulse = (rng.random(len(days)) > 0.97).astype(float)
     japan = (rng.random(len(days)) > 0.92).astype(float)
     chile = (rng.random(len(days)) > 0.93).astype(float)
@@ -62,5 +62,5 @@ def test_probe_timeshift_kills_planted_m8_and_where_finds_the_box(tmp_path):
     assert (shifted.get("lift") or 0) < (aligned.get("lift") or 0) + 0.02
     transfer = report["where_transfer"]
     assert transfer["n_hold"]
-    assert transfer["leftover_acc"] is not None
-    assert transfer["leftover_acc"] >= transfer["majority_acc"] - 0.05
+    assert transfer["fresh_acc"] is not None
+    assert transfer["fresh_acc"] >= transfer["majority_acc"] - 0.05

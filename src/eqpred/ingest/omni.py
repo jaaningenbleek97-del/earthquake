@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from io import StringIO
+from time import sleep
 
 import pandas as pd
 
@@ -13,6 +14,8 @@ from eqpred.stamp import utc_ts
 OMNI_DAILY_URLS = (
     "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni_01_av.dat",
     "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2_daily.dat",
+    "https://cdaweb.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni_01_av.dat",
+    "https://cdaweb.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2_daily.dat",
 )
 LICENSE = "https://omniweb.gsfc.nasa.gov/html/ow_data.html"
 LATENCY = timedelta(days=3)
@@ -113,16 +116,20 @@ def parse_omni_daily(text: str) -> pd.DataFrame:
 def pull_omni(start: datetime, end: datetime, ingest_run_id: str) -> pd.DataFrame:
     last_error: Exception | None = None
     frame = pd.DataFrame()
-    for url in OMNI_DAILY_URLS:
-        try:
-            text = fetch_text(url, timeout=180)
-            frame = parse_omni_daily(text)
-            if frame.empty:
-                frame = _parse_fallback(text)
-            if not frame.empty:
-                break
-        except Exception as exc:  # noqa: BLE001 — try the next archive URL
-            last_error = exc
+    for attempt in range(3):
+        for url in OMNI_DAILY_URLS:
+            try:
+                text = fetch_text(url, timeout=180)
+                frame = parse_omni_daily(text)
+                if frame.empty:
+                    frame = _parse_fallback(text)
+                if not frame.empty:
+                    break
+            except Exception as exc:  # noqa: BLE001 — try the next archive URL
+                last_error = exc
+        if not frame.empty:
+            break
+        sleep(5 * (attempt + 1))
     if frame.empty:
         raise RuntimeError(f"OMNI daily download failed: {last_error}")
     frame["ingest_run_id"] = ingest_run_id

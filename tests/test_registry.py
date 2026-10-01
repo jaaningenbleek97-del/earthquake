@@ -31,6 +31,7 @@ def test_register_same_brain_is_idempotent(tmp_path):
     assert first["id"] == second["id"]
     assert first["brain_hash"] == second["brain_hash"]
     assert first["code_hash"]
+    assert first["model_ids"] == ["fresh.mainshock.v1", "alarm.spf.v2"]
     assert (model_dir(tmp_path) / "registry" / first["id"] / "etas.json").exists()
 
 
@@ -97,4 +98,5 @@ def test_schema_allows_registry_fields():
     schema = json.loads((repo_root() / "schemas" / "prediction.schema.json").read_text(encoding="utf-8"))
     assert "registry_id" in schema["properties"]
     assert "code_hash" in schema["properties"]
+    assert "competitor_climatology_p" in schema["properties"]
     assert all(name.endswith(".json") for name in MODEL_FILES)

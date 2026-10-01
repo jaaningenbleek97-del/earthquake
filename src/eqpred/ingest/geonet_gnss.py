@@ -66,38 +66,50 @@ def parse_tilde_json(payload: object) -> list[tuple[datetime, float]]:
     return rows
 
 
-def _windows(start: datetime, end: datetime, years: int = 2):
+def _windows(start: datetime, end: datetime, days: int = 30):
+    """Tilde 400s on windows longer than about a month, and on future end dates."""
     cursor = start
+    step = timedelta(days=days)
     while cursor < end:
-        try:
-            nxt = datetime(cursor.year + years, 1, 1, tzinfo=timezone.utc)
-        except ValueError:
-            nxt = end
-        yield cursor, min(nxt, end)
-        cursor = min(nxt, end)
+        nxt = min(cursor + step, end)
+        yield cursor, nxt
+        cursor = nxt
+
+
+def _tilde_window(site: str, aspect: str, start: datetime, end: datetime) -> list[tuple[datetime, float]]:
+    if end <= start:
+        return []
+    url = TILDE_URL.format(
+        site=site,
+        aspect=aspect,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+    )
+    print(f"  Tilde {site} {aspect} {start.date()}->{end.date()}", flush=True)
+    try:
+        payload = fetch_json(url, timeout=90)
+    except Exception as exc:  # noqa: BLE001 — one dead site must not kill the overlay
+        span = (end - start).days
+        if "HTTP 400" in str(exc) and span > 3:
+            mid = start + timedelta(days=span // 2)
+            return _tilde_window(site, aspect, start, mid) + _tilde_window(site, aspect, mid, end)
+        print(f"    skip {site} {aspect}: {exc}", flush=True)
+        return []
+    return parse_tilde_json(payload)
 
 
 def pull_geonet_gnss(start: datetime, end: datetime, ingest_run_id: str) -> pd.DataFrame:
     """Daily NZ GNSS from GeoNet Tilde. Unused on issued p until a head beats ETAS."""
+    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    if end > now:
+        end = now
     by_day: dict[pd.Timestamp, dict[str, list[float]]] = {}
     for site in NZ_SITES:
         got_any = False
         for aspect, col in ASPECTS.items():
             parsed: list[tuple[datetime, float]] = []
             for win_start, win_end in _windows(start, end):
-                url = TILDE_URL.format(
-                    site=site,
-                    aspect=aspect,
-                    start=win_start.strftime("%Y-%m-%d"),
-                    end=win_end.strftime("%Y-%m-%d"),
-                )
-                print(f"  Tilde {site} {aspect} {win_start.date()}->{win_end.date()}", flush=True)
-                try:
-                    payload = fetch_json(url, timeout=90)
-                except Exception as exc:  # noqa: BLE001 — one dead site must not kill the overlay
-                    print(f"    skip {site} {aspect}: {exc}", flush=True)
-                    continue
-                parsed.extend(parse_tilde_json(payload))
+                parsed.extend(_tilde_window(site, aspect, win_start, win_end))
             if not parsed:
                 continue
             got_any = True

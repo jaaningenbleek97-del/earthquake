@@ -54,6 +54,28 @@ def along_updip_km(
     return along, updip
 
 
+def fault_plane_distance_km(
+    lon: np.ndarray,
+    lat: np.ndarray,
+    depth_km: np.ndarray,
+    lon0: float,
+    lat0: float,
+    strike: float,
+    dip: float,
+) -> np.ndarray:
+    """Perpendicular distance to the locked receiver plane in kilometres."""
+    lat0r = np.radians(lat0)
+    east = wrap180_arr(np.asarray(lon, dtype=float) - lon0) * 111.32 * np.cos(lat0r)
+    north = (np.asarray(lat, dtype=float) - lat0) * 111.32
+    depth = np.asarray(depth_km, dtype=float)
+    az = np.radians(strike + 90.0)
+    down_h = east * np.sin(az) + north * np.cos(az)
+    dip_r = np.radians(dip)
+    # The plane descends along strike+90: depth = down_h * tan(dip).
+    normal = depth * np.cos(dip_r) - down_h * np.sin(dip_r)
+    return np.abs(normal)
+
+
 def wrap180_arr(lon: np.ndarray) -> np.ndarray:
     return np.mod(lon + 180.0, 360.0) - 180.0
 
@@ -196,11 +218,24 @@ def measure_cluster(cluster: pd.DataFrame, region_id: str) -> dict:
         float(fault["strike"]),
         float(fault["dip"]),
     )
+    lon = cluster["lon"].to_numpy(dtype=float)
+    lat = cluster["lat"].to_numpy(dtype=float)
+    depth = cluster["depth_km"].to_numpy(dtype=float)
+    centroid_fault_km = fault_plane_distance_km(
+        np.array([float(np.nanmean(lon))]),
+        np.array([float(np.nanmean(lat))]),
+        np.array([float(np.nanmean(depth))]),
+        lon0,
+        lat0,
+        float(fault["strike"]),
+        float(fault["dip"]),
+    )[0]
     swarm = swarm_score(cluster["magnitude"].to_numpy(dtype=float))
     return {
         "n": int(len(cluster)),
         "along_km_d": slope_per_day(hours.to_numpy(dtype=float), along),
         "updip_km_d": slope_per_day(hours.to_numpy(dtype=float), updip),
+        "fault_km": float(centroid_fault_km),
         "swarm": swarm,
         "shape": shape_label(swarm),
         "hours": hours.to_numpy(dtype=float),

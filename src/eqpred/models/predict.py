@@ -8,18 +8,17 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 
-from eqpred.catalog import load_comcat, load_comcat_versions
+from eqpred.catalog import load_comcat
 from eqpred.ingest.watchdog import ensure_can_issue
 from eqpred.models.etas import EtasParams, daily_background_and_cluster, params_from_dict
-from eqpred.models.calibrate import issued_scale, load_calibration
-from eqpred.models.attribution import alarm_attrs, anti_attrs, fusion_attrs
-from eqpred.models.anti import ANTI_MODEL, below_cutoff, load_anti
+from eqpred.models.calibrate import issued_scale
+from eqpred.models.attribution import alarm_attrs, fresh_attrs
 from eqpred.models.budget import AlertBudget, load_budget
 from eqpred.models.registry import ensure_registered, stamp_cards, write_batch_meta
-from eqpred.models.gr import load_gr, rate_to_p, scale_rate
+from eqpred.models.gr import rate_to_p
 from eqpred.models.modulator import Modulator, modulator_from_dict
-from eqpred.models.quiet import is_quiet, load_quiet, unconventional_drivers
 from eqpred.paths import feature_dir, model_dir, prediction_batches, prediction_dir
+from eqpred.eval.honest import classify_card_kind
 from eqpred.records import prediction
 from eqpred.regions import REGIONS, in_bbox, is_issued_box, region_centroid_lon
 from eqpred.stamp import parse_utc, utc_ts
@@ -214,51 +213,47 @@ def begin_issue(
     return gated
 
 
+def _lookup_daily_p(series: pd.Series, issued) -> float | None:
+    ts = pd.Timestamp(issued)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    idx = pd.DatetimeIndex(series.index)
+    if ts in idx:
+        val = series.loc[ts]
+        return float(val.iloc[0] if isinstance(val, pd.Series) else val)
+    norms = {pd.Timestamp(i).tz_convert("UTC").normalize(): float(v) for i, v in series.items()}
+    return norms.get(ts.normalize())
+
+
 def issue_predictions(
     start: datetime,
     end: datetime,
-    horizon_days: int = 7,
+    horizon_days: int = 30,
     root: Path | None = None,
 ) -> list[dict]:
+    from eqpred.eval.mainshock import FRESH_MODEL_ID, issued_fresh_daily
+
     features = pd.read_parquet(feature_dir(root) / "global_daily.parquet")
     features["issue_time"] = parse_utc(features["issue_time"])
     quakes = load_comcat(root)
-    versions = load_comcat_versions(root)
-    etas, mod = load_models(root)
-    gr = load_gr(root)
-    b = float(gr.get("b") or 1.0)
-    m0 = float(gr.get("m0") or etas.m0)
-    quiet_cfg = load_quiet(root)
-    quiet_cut = float(quiet_cfg.get("lambda_etas_max") or 0.0)
-    cal = load_calibration(root)
-    cal_scale = issued_scale(cal, "global", horizon_days)
-    anti_cfg = load_anti(root)
     dest = prediction_dir(root)
     registry = ensure_registered(root)
     budget = AlertBudget.from_config(load_budget(root))
-    rates = expected_counts(features, quakes, etas, mod, versions=versions)
-    rates["issue_time"] = parse_utc(rates["issue_time"])
-    days = pd.DatetimeIndex(rates["issue_time"])
-    box_lams: dict[str, pd.Series] = {}
-    for rid, region in REGIONS.items():
-        if not is_issued_box(region):
-            continue
-        hist, params = _region_etas(quakes, etas, region)
-        box_lams[rid] = pd.Series(
-            daily_background_and_cluster(hist, days, params, versions=versions),
-            index=rates.index,
-        )
+    _feat, daily = issued_fresh_daily(root=root, features=features, quakes=quakes)
 
     window = (
         (features["issue_time"] >= utc_ts(start))
         & (features["issue_time"] < utc_ts(end))
     )
     cards: list[dict] = []
+    written = datetime.now(timezone.utc)
     prior = load_batch_cards(dest)
-    window = begin_issue(rates, window, root, dest)
+    window = begin_issue(features, window, root, dest)
     issued_days = {
         pd.Timestamp(ts).tz_convert("UTC").normalize()
-        for ts in parse_utc(rates.loc[window, "issue_time"])
+        for ts in parse_utc(features.loc[window, "issue_time"])
     }
     seeded = budget.seed_from_cards(prior, exclude_days=issued_days)
     if seeded:
@@ -271,33 +266,22 @@ def issue_predictions(
         if is_issued_box(region)
     )
 
-    for _, row in rates.loc[window].iterrows():
+    for _, row in features.loc[window].iterrows():
         issued = row["issue_time"].to_pydatetime()
         valid_to = issued + timedelta(days=horizon_days)
-        # λ is the daily M≥m0 count. Cards name a higher floor, so convert with
-        # the locked GR b before the Poisson "at least one" step. Upcoming
-        # integral ≈ today's rate × horizon (walk-forward; future Omori decay
-        # is already in today's λ via live aftershocks).
         feat_row = features.loc[features["issue_time"] == row["issue_time"]].iloc[0]
-        quiet = is_quiet(float(row["lambda_etas"]), quiet_cut)
         spf_on = float(feat_row.get("spf_significant_window") or 0) > 0.5
-        unconv = unconventional_drivers(feat_row)
-        p_etas_quiet = rate_to_p(float(row["lambda_etas"]), QUIET_MAG, m0, b, horizon_days)
 
         for region_id, region, mag in fusion_targets:
-            if region_id == "global":
-                lam0 = float(row["lambda_etas"])
-                scale = cal_scale
-            else:
-                lam0 = float(box_lams[region_id].loc[row.name])
-                scale = issued_scale(cal, region_id, horizon_days)
-            note = f"cal={scale:.3f} garnish unused g={row['gain']:.3f} unused"
-            gains = {"etas_calibrated": scale}
-            card_drivers = fusion_attrs(gains)
-            lam1 = lam0 * scale
-            value = rate_to_p(lam1, mag, m0, b, horizon_days)
-            etas_p = rate_to_p(lam0, mag, m0, b, horizon_days)
-            lam_card = float(scale_rate(lam1, mag, m0, b))
+            pack = daily.get(region_id)
+            if not pack:
+                continue
+            value = _lookup_daily_p(pack["p"], row["issue_time"])
+            if value is None:
+                continue
+            climate = float(pack["climatology_p"])
+            why = [str(c.get("label") or c.get("driver") or "") for c in (pack.get("connections") or []) if c]
+            why_txt = ", ".join(bit for bit in why[:4] if bit) or "the fresh-shock mix"
             cards.append(
                 prediction(
                     prediction_id=f"{issued.date()}-{region_id}-m{mag:g}-{uuid4().hex[:8]}",
@@ -309,41 +293,17 @@ def issue_predictions(
                     magnitude_min=mag,
                     kind="probability",
                     value=value,
-                    model_id="fusion.etas_x_mod.v1",
-                    drivers=card_drivers,
+                    model_id=FRESH_MODEL_ID,
+                    drivers=fresh_attrs(pack.get("connections")),
                     rationale=(
-                        f"lambda_etas(M>={m0:g})={lam0:.3f} {note} "
-                        f"lambda(M>={mag:g})={lam_card:.4f} b={b:.3f}"
+                        f"fresh-shock p={value:.4f} climatology={climate:.4f} "
+                        f"uses {why_txt}"
                     ),
-                    competitor_etas_p=etas_p,
+                    competitor_climatology_p=climate,
+                    written_at=written,
+                    card_kind=classify_card_kind(issued, written),
                 )
             )
-            if below_cutoff(anti_cfg, region_id, value) and budget.spend(
-                ANTI_MODEL, region_id, issued
-            ):
-                cap = budget.cap(ANTI_MODEL)
-                used = budget.used(ANTI_MODEL, region_id, issued)
-                cut = (anti_cfg.get("regions") or {}).get(region_id, {}).get("p_max")
-                cards.append(
-                    prediction(
-                        prediction_id=f"{issued.date()}-{region_id}-quiet-{uuid4().hex[:8]}",
-                        issued_at=issued,
-                        valid_from=issued,
-                        valid_to=valid_to,
-                        horizon_days=horizon_days,
-                        region=region,
-                        magnitude_min=mag,
-                        kind="alarm",
-                        value=1.0,
-                        model_id=ANTI_MODEL,
-                        drivers=anti_attrs(value, None if cut is None else float(cut)),
-                        rationale=(
-                            f"issued p={value:.4f}<=cutoff {float(cut):.4f}; "
-                            f"monthly budget {used}/{cap}"
-                        ),
-                        competitor_etas_p=etas_p,
-                    )
-                )
             if region_id == "global" and spf_on and budget.spend("alarm.spf.v2", region_id, issued):
                 cap = budget.cap("alarm.spf.v2")
                 used = budget.used("alarm.spf.v2", region_id, issued)
@@ -364,52 +324,8 @@ def issue_predictions(
                             "Tightened SPF window (v2 + 20% train budget); "
                             f"monthly budget {used}/{cap}"
                         ),
-                    )
-                )
-            if region_id == "global" and quiet and unconv and budget.spend(
-                "alarm.quiet.v1", region_id, issued
-            ):
-                cap = budget.cap("alarm.quiet.v1")
-                used = budget.used("alarm.quiet.v1", region_id, issued)
-                cards.append(
-                    prediction(
-                        prediction_id=f"{issued.date()}-quiet-m7-{uuid4().hex[:8]}",
-                        issued_at=issued,
-                        valid_from=issued,
-                        valid_to=valid_to,
-                        horizon_days=horizon_days,
-                        region=REGIONS["global"],
-                        magnitude_min=QUIET_MAG,
-                        kind="alarm",
-                        value=1.0,
-                        model_id="alarm.quiet.v1",
-                        drivers=alarm_attrs("etas_quiet", *unconv),
-                        rationale=(
-                            f"ETAS quiet (lambda={float(row['lambda_etas']):.3f}<={quiet_cut:.3f}); "
-                            f"monthly budget {used}/{cap}"
-                        ),
-                        competitor_etas_p=p_etas_quiet,
-                    )
-                )
-            if region_id == "global" and quiet and spf_on and budget.spend(
-                "alarm.quiet_spf.v1", region_id, issued
-            ):
-                cap = budget.cap("alarm.quiet_spf.v1")
-                used = budget.used("alarm.quiet_spf.v1", region_id, issued)
-                cards.append(
-                    prediction(
-                        prediction_id=f"{issued.date()}-quiet-m8-{uuid4().hex[:8]}",
-                        issued_at=issued,
-                        valid_from=issued,
-                        valid_to=issued + timedelta(days=20),
-                        horizon_days=20,
-                        region=REGIONS["global"],
-                        magnitude_min=8.0,
-                        kind="alarm",
-                        value=1.0,
-                        model_id="alarm.quiet_spf.v1",
-                        drivers=alarm_attrs("etas_quiet", "spf_significant_window"),
-                        rationale=f"Quiet-regime SPF M8 specialist; monthly budget {used}/{cap}",
+                        written_at=written,
+                        card_kind=classify_card_kind(issued, written),
                     )
                 )
 

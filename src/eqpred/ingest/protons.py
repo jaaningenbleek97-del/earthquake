@@ -11,6 +11,35 @@ from eqpred.records import iso
 SOURCE = "noaa.goes_protons"
 LICENSE = "https://www.weather.gov/disclaimer"
 LATENCY = timedelta(hours=12)
+LATENCY_LIVE = LATENCY
+LATENCY_SEISS = timedelta(days=7)
+LATENCY_DPD = timedelta(days=90)
+LATENCY_SPE = timedelta(days=7)
+
+
+def stamp_available_at(frame: pd.DataFrame, latency: timedelta) -> pd.DataFrame:
+    """Stamp when a morning may use each row. Empty frames pass through."""
+    if frame is None or frame.empty or "observed_at" not in frame.columns:
+        return frame if frame is not None else pd.DataFrame()
+    out = frame.copy()
+    stamp = pd.to_datetime(out["observed_at"], utc=True)
+    out["available_at"] = [iso(t.to_pydatetime() + latency) for t in stamp]
+    return out
+
+
+def fill_missing_available_at(frame: pd.DataFrame, latency: timedelta) -> pd.DataFrame:
+    """Fill holes only. Never overwrite a source that already stamped available_at."""
+    if frame is None or frame.empty:
+        return frame if frame is not None else pd.DataFrame()
+    if "available_at" not in frame.columns:
+        return stamp_available_at(frame, latency)
+    missing = frame["available_at"].isna()
+    if not missing.any():
+        return frame
+    out = frame.copy()
+    filled = stamp_available_at(out.loc[missing], latency)
+    out.loc[missing, "available_at"] = filled["available_at"].to_numpy()
+    return out
 
 # Operational JSON is short-horizon. Long replay is NCEI Daily Particle Data
 # (fluence, 1994–2020 Q1) plus the NOAA SPE list for later storm days.
@@ -26,10 +55,7 @@ DPD_BASE = (
     "https://www.ngdc.noaa.gov/stp/space-weather/swpc-products/"
     "annual_reports/daily_solar_indices_summaries/daily_particle_data/"
 )
-DPD_FILES = (
-    "2016_DPD.txt",
-    "2017_DPD.txt",
-    "2018_DPD.txt",
+DPD_FILES = tuple(f"{year}_DPD.txt" for year in range(1994, 2019)) + (
     "2019Q1_DPD.txt",
     "2019Q2_DPD.txt",
     "2019Q3_DPD.txt",
@@ -298,7 +324,7 @@ def pull_protons(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> pd.DataFrame:
-    """GOES integral protons: NCEI DPD archive + SPE storms + SWPC JSON tail."""
+    """GOES integral protons: DPD + GOES-R SEISS SGPS + SPE storms + SWPC JSON."""
     print("  NCEI daily particle data", flush=True)
     dpd_parts: list[pd.DataFrame] = []
     for name in DPD_FILES:
@@ -325,6 +351,11 @@ def pull_protons(
     if spe.empty:
         print("  SPE list skipped", flush=True)
 
+    print("  GOES-R SEISS SGPS (NCEI L2 avg5m)", flush=True)
+    from eqpred.ingest.seiss import pull_seiss
+
+    seiss = pull_seiss("sgps", ingest_run_id, start, end)
+
     rows: list[Any] = []
     seen: set[str] = set()
     for url in PROTON_URLS:
@@ -343,17 +374,22 @@ def pull_protons(
         fluence_rows.extend(_safe_json(url))
     live_fluence = parse_goes_fluence(fluence_rows)
 
-    # Archive first; live JSON overwrites the last few days. SPE fills storm
-    # days after DPD ended (2020 Q1) when no fluence file exists.
-    daily = combine_proton_frames((dpd, spe, live_fluence, live_flux))
+    # Archive first; SEISS fills 2020-11 onward; live JSON overwrites the tail.
+    # SPE still covers storm days in the Apr–Oct 2020 SGPS gap.
+    # Stamp each source before merge so DPD/SEISS/SPE keep their own latency.
+    dpd = stamp_available_at(dpd, LATENCY_DPD)
+    spe = stamp_available_at(spe, LATENCY_SPE)
+    seiss = stamp_available_at(seiss, LATENCY_SEISS)
+    live_fluence = stamp_available_at(live_fluence, LATENCY_LIVE)
+    live_flux = stamp_available_at(live_flux, LATENCY_LIVE)
+    daily = combine_proton_frames((dpd, spe, seiss, live_fluence, live_flux))
     daily = _in_window(daily, start, end)
     if daily.empty:
         return pd.DataFrame()
     daily["source"] = SOURCE
     daily["ingest_run_id"] = ingest_run_id
     daily["license"] = LICENSE
-    stamp = pd.to_datetime(daily["observed_at"], utc=True)
-    daily["available_at"] = [iso(t.to_pydatetime() + LATENCY) for t in stamp]
+    daily = fill_missing_available_at(daily, LATENCY_LIVE)
     if "goes_spe" not in daily.columns:
         daily["goes_spe"] = 0.0
     else:

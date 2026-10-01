@@ -1,4 +1,4 @@
-from eqpred.eval.battery import run_battery
-from eqpred.eval.score import score_predictions, summarize_ledger
-
-__all__ = ["run_battery", "score_predictions", "summarize_ledger"]
+"""Evaluation package. Submodules are imported directly — keep this file empty
+so `eqpred.models.predict` can load `eqpred.eval.honest` without a circular import
+through battery → strategies → predict.
+"""

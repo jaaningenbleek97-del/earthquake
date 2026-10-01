@@ -4,7 +4,28 @@ import pandas as pd
 
 from eqpred.eval.promote import evaluate_promote, run_promote
 from eqpred.ingest.fdsn import parse_fdsn_geojson
-from eqpred.ingest.protons import parse_dpd_text, parse_goes_fluence, parse_goes_protons, parse_spe_text
+from eqpred.ingest.protons import (
+    LATENCY_DPD,
+    LATENCY_LIVE,
+    LATENCY_SEISS,
+    LATENCY_SPE,
+    combine_proton_frames,
+    fill_missing_available_at,
+    parse_dpd_text,
+    parse_goes_fluence,
+    parse_goes_protons,
+    parse_spe_text,
+    stamp_available_at,
+)
+from eqpred.ingest.seiss import (
+    G16_EAST_END,
+    SGPS_START,
+    bounds_from_effective_kev,
+    integral_above,
+    parse_mpsh_nc,
+    parse_sgps_nc,
+    sat_order,
+)
 from eqpred.ingest.sse import events_to_daily, parse_hikurangi_rda_frame, parse_sloweq_csv
 from eqpred.ingest.so2 import _year_request
 
@@ -84,6 +105,82 @@ def test_parse_goes_fluence_divides_by_day():
         [{"time_tag": "2026-09-01T00:00:00Z", "energy": ">=10 MeV", "fluence": 86400.0}]
     )
     assert float(frame.iloc[0]["goes_proton_10mev"]) == 1.0
+
+
+def test_seiss_integral_above_uses_channel_width():
+    import numpy as np
+
+    # One sample, one sensor, one 1.0–1.9 MeV channel at 0.002 pfu/keV.
+    diff = np.array([[[0.002]]])
+    p11 = np.array([[0.5]])
+    pfu = integral_above(diff, np.array([1.0]), np.array([1.9]), 1.0, p11)
+    assert abs(float(pfu[0, 0]) - 2.3) < 1e-9
+    high = integral_above(diff, np.array([1.0]), np.array([1.9]), 5.0, p11)
+    assert abs(float(high[0, 0]) - 0.5) < 1e-9
+
+
+def test_parse_sgps_nc_daily_max(tmp_path):
+    import netCDF4
+
+    path = tmp_path / "sgps.nc"
+    with netCDF4.Dataset(path, "w") as ds:
+        ds.createDimension("time", 2)
+        ds.createDimension("sensor_units", 2)
+        ds.createDimension("diff_channels", 2)
+        flux = ds.createVariable("AvgDiffProtonFlux", "f4", ("time", "sensor_units", "diff_channels"))
+        flux[:] = [[[0.001, 0.0], [0.0, 0.0]], [[0.002, 0.0], [0.0, 0.0]]]
+        p11 = ds.createVariable("AvgIntProtonFlux", "f4", ("time", "sensor_units"))
+        p11[:] = [[0.0, 0.0], [0.1, 0.0]]
+        lo = ds.createVariable("DiffProtonLowerEnergy", "f4", ("diff_channels",))
+        hi = ds.createVariable("DiffProtonUpperEnergy", "f4", ("diff_channels",))
+        lo[:] = [1.0, 6.5]
+        hi[:] = [1.9, 12.0]
+    frame = parse_sgps_nc(path.read_bytes(), datetime(2024, 1, 2, tzinfo=timezone.utc))
+    assert len(frame) == 1
+    assert frame.iloc[0]["observed_at"].startswith("2024-01-02")
+    # Daily max uses 0.002 * 900 keV + 0.1 P11.
+    assert abs(float(frame.iloc[0]["goes_proton_1mev"]) - 1.9) < 1e-6
+    assert abs(float(frame.iloc[0]["goes_proton_500mev"]) - 0.1) < 1e-6
+    assert float(frame.iloc[0]["goes_spe"]) == 0.0
+
+
+def test_parse_mpsh_nc_integral_electrons(tmp_path):
+    import netCDF4
+
+    path = tmp_path / "mpsh.nc"
+    with netCDF4.Dataset(path, "w") as ds:
+        ds.createDimension("time", 2)
+        ds.createDimension("telescopes", 2)
+        ds.createDimension("electron_diff_chans", 3)
+        integral = ds.createVariable("AvgIntElectronFlux", "f4", ("time", "telescopes"))
+        integral[:] = [[80.0, 40.0], [150.0, 20.0]]
+        diff = ds.createVariable("AvgDiffElectronFlux", "f4", ("time", "telescopes", "electron_diff_chans"))
+        diff[:] = [[[0.0, 0.02, 0.0], [0.0, 0.0, 0.0]], [[0.0, 0.03, 0.0], [0.0, 0.0, 0.0]]]
+        eff = ds.createVariable("DiffElectronEffectiveEnergy", "f4", ("electron_diff_chans",))
+        eff[:] = [400.0, 900.0, 2000.0]
+    frame = parse_mpsh_nc(path.read_bytes(), datetime(2024, 6, 1, tzinfo=timezone.utc))
+    assert float(frame.iloc[0]["electron_2mev"]) == 150.0
+    assert float(frame.iloc[0]["electron_08mev"]) > 0
+    assert float(frame.iloc[0]["electron_08mev"]) < 100.0
+
+
+def test_electron_bounds_from_effective_energy():
+    import numpy as np
+
+    lo, hi = bounds_from_effective_kev(np.array([80.0, 160.0, 320.0]))
+    assert lo[0] == 0.04
+    assert abs(hi[-1] - 0.4) < 1e-9
+    assert abs(lo[1] - 0.12) < 1e-9
+
+
+def test_seiss_sat_order_follows_east_handoff():
+    before = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    after = datetime(2025, 4, 8, tzinfo=timezone.utc)
+    assert sat_order(before, "sgps")[0] == 16
+    assert sat_order(after, "sgps")[0] == 19
+    assert sat_order(SGPS_START, "sgps")[0] == 16
+    assert sat_order(datetime(2024, 5, 1, tzinfo=timezone.utc), "sgps")[0] == 18
+    assert G16_EAST_END.year == 2025
 
 
 def test_parse_spe_text_peak_on_start_day():
@@ -188,3 +285,44 @@ def test_promote_gate_passes_only_when_both_bars_clear():
         }
     )
     assert half["pass"] is False
+
+
+def test_stamp_available_at_uses_source_latency():
+    frame = pd.DataFrame({"observed_at": ["2016-01-01T00:00:00Z"], "goes_proton_10mev": [1.0]})
+    dpd = stamp_available_at(frame, LATENCY_DPD)
+    seiss = stamp_available_at(frame, LATENCY_SEISS)
+    live = stamp_available_at(frame, LATENCY_LIVE)
+    spe = stamp_available_at(frame, LATENCY_SPE)
+    assert dpd.iloc[0]["available_at"].startswith("2016-03-31")
+    assert seiss.iloc[0]["available_at"].startswith("2016-01-08")
+    assert live.iloc[0]["available_at"].startswith("2016-01-01T12:00:00")
+    assert spe.iloc[0]["available_at"].startswith("2016-01-08")
+
+
+def test_combine_proton_keeps_source_available_at():
+    dpd = stamp_available_at(
+        pd.DataFrame({"observed_at": ["2016-01-01T00:00:00Z"], "goes_proton_10mev": [1.0]}),
+        LATENCY_DPD,
+    )
+    seiss = stamp_available_at(
+        pd.DataFrame({"observed_at": ["2021-01-01T00:00:00Z"], "goes_proton_10mev": [2.0]}),
+        LATENCY_SEISS,
+    )
+    live = stamp_available_at(
+        pd.DataFrame(
+            {
+                "observed_at": ["2021-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+                "goes_proton_10mev": [3.0, 4.0],
+            }
+        ),
+        LATENCY_LIVE,
+    )
+    out = combine_proton_frames((dpd, seiss, live))
+    archive = out.loc[out["observed_at"].str.startswith("2016-01-01")].iloc[0]
+    overlap = out.loc[out["observed_at"].str.startswith("2021-01-01")].iloc[0]
+    tail = out.loc[out["observed_at"].str.startswith("2026-01-01")].iloc[0]
+    assert archive["available_at"].startswith("2016-03-31")
+    assert overlap["available_at"].startswith("2021-01-01T12:00:00")
+    assert tail["available_at"].startswith("2026-01-01T12:00:00")
+    filled = fill_missing_available_at(out, LATENCY_LIVE)
+    assert filled.iloc[0]["available_at"] == archive["available_at"]

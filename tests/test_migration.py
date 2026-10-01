@@ -10,6 +10,7 @@ from eqpred.features.migration import (
     active_cluster,
     along_updip_km,
     cluster_asof,
+    fault_plane_distance_km,
     migration_frame,
     slope_per_day,
     swarm_score,
@@ -62,6 +63,29 @@ def test_shallowing_is_positive_updip():
     )
     assert updip[1] > updip[0]
     assert slope_per_day(np.array([0.0, 48.0]), updip) > 0
+
+
+def test_fault_plane_distance_is_zero_on_locked_plane():
+    lon0 = region_centroid_lon(REGIONS["hikurangi"])
+    lat0 = 0.5 * (REGIONS["hikurangi"]["min_lat"] + REGIONS["hikurangi"]["max_lat"])
+    dip = 12.0
+    down_h = 40.0
+    az = np.radians(45.0 + 90.0)
+    east = down_h * np.sin(az)
+    north = down_h * np.cos(az)
+    lon = lon0 + east / (111.32 * np.cos(np.radians(lat0)))
+    lat = lat0 + north / 111.32
+    depth = down_h * np.tan(np.radians(dip))
+    distance = fault_plane_distance_km(
+        np.array([lon]),
+        np.array([lat]),
+        np.array([depth]),
+        lon0,
+        lat0,
+        45.0,
+        dip,
+    )
+    assert float(distance[0]) < 1e-6
 
 
 def test_future_event_hidden_until_available():

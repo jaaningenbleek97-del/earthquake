@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-"""Leftover stack: what the unconventional mix would say this morning.
+"""Garnish stack: ETAS λ times trained non-catalog multipliers. Lab foil, not issued p.
 
-Issued cards stay calibrated ETAS until this mix beats it on later years.
-This module still applies the trained leftovers so the lab can show our call.
+Issued cards are the standalone fresh-shock classifier. This module still
+multiplies ETAS λ so the lab can see the unused garnish.
 """
 
 import math
@@ -19,19 +19,56 @@ from eqpred.models.gr import load_gr, rate_to_p
 from eqpred.models.migration import load_migration
 from eqpred.models.nowcast import load_nowcast
 from eqpred.models.predict import load_models
+from eqpred.eval.horizon import HORIZON_DAYS
 from eqpred.models.wave2 import load_wave2
 
 WATCH_FLAGS = (
-    ("spf_significant_window", "Solar proton-flare window"),
-    ("proton_spike", "Proton spike"),
+    ("spf_significant_window", "Solar polar-field window"),
+    ("proton_spike", "Solar-wind proton spike"),
     ("kp_high", "Magnetic storm (Kp)"),
     ("dst_storm", "Magnetic storm (Dst)"),
-    ("near_new_or_full", "New or full moon"),
-    ("neutron_forbush", "Cosmic-ray Forbush decrease"),
-    ("cosmic_gle", "Ground-level solar cosmic-ray event"),
+    ("ap_storm", "Magnetic storm (Ap)"),
+    ("bz_south_7d", "Southward IMF this week"),
     ("cme_halo", "Halo coronal mass ejection"),
+    ("hss_on", "Coronal-hole high-speed stream"),
+    ("flare_x_on", "X-class solar flare"),
+    ("spe_on", "Solar energetic protons"),
+    ("neutron_forbush", "Cosmic-ray Forbush decrease"),
+    ("cosmic_gle", "Ground-level cosmic-ray event"),
+    ("ulf_high", "ULF / magnetometer pulse"),
+    ("solar_max_near", "Near solar maximum"),
+    ("solar_descending", "Descending solar cycle"),
+    ("near_new_or_full", "New or full moon"),
+    ("solar_eclipse_window", "Solar eclipse geometry"),
+    ("lunar_eclipse_window", "Lunar eclipse geometry"),
+    ("planet_hard_on", "Hard planetary aspects"),
+    ("polar_vortex_weak", "Weak polar vortex (AO)"),
+    ("ssc_dst", "Sudden Dst commencement"),
+    ("sunspot_hemisphere_skew", "Lopsided sunspot hemispheres"),
+    ("volcano_unrest", "Volcanic unrest"),
+    ("sse_on", "Hikurangi slow slip"),
+    ("tremor_on", "Hikurangi / Alpine tremor"),
+    ("well_drop", "Groundwater drop"),
+    ("scint_high", "Ionosphere scintillation"),
+    ("haarp_on", "HAARP campaign"),
+    ("dvv_drop", "Crustal dv/v drop"),
+    ("wspr_quiet", "WSPR NZ path quiet"),
+    ("wiki_hot", "Wikipedia earthquake pageviews"),
+    ("hydro_wet", "Wet week (lakes / SMAP / POWER soil)"),
+    ("roti_high", "GeoNet ROTI / cycle-slip high"),
+    ("cal_payday", "Payday window"),
+    ("dart_drop", "Ocean-bottom pressure drop"),
+    ("tec_storm", "Ionosphere TEC anomaly"),
+    ("radon_high", "Radon spike"),
+    ("grace_wet", "GRACE water-mass load"),
+    ("so2_high", "Volcanic SO2"),
+    ("strain_pulse", "Borehole strain pulse"),
+    ("era5_wet", "Soil / hydrology load"),
+    ("olr_anomaly", "Outgoing longwave anomaly"),
+    ("gnss_dilatation", "GPS strain dilatation"),
     ("dust_fireball", "Fireball / meteoroid"),
-    ("lunar_eclipse_window", "Eclipse geometry window"),
+    ("earth_state_unusual", "Unusual Earth state"),
+    ("graph_transfer_on", "Fault-network stress transfer"),
 )
 
 GAIN_LABELS = {
@@ -70,12 +107,12 @@ def _wave2_metas(payload: dict, region_id: str) -> list[dict]:
     return [dict(meta) for meta in cols if _gate_on(meta)]
 
 
-def leftover_gains(
+def garnish_gains(
     feat_row: pd.Series | pd.DataFrame | dict,
     region_id: str,
     root: Path | None = None,
 ) -> dict[str, float]:
-    """Trained leftover multipliers. 1.0 means that term did not move the rate."""
+    """Trained non-catalog multipliers. 1.0 means that term did not move the rate."""
     frame = _as_frame(feat_row)
     row = frame.iloc[0]
     _etas, mod = load_models(root)
@@ -134,7 +171,7 @@ def leftover_gains(
 
 
 def lam0_from_etas_p(p, mag: float, m0: float, b: float, horizon_days: float) -> float:
-    """Invert the Poisson card so we can replay leftover on the same morning."""
+    """Invert the Poisson card so we can replay the garnish on the same morning."""
     clipped = min(max(float(p), 1e-12), 1.0 - 1e-12)
     daily_at_mag = -math.log(1.0 - clipped) / float(horizon_days)
     dm = max(float(mag) - float(m0), 0.0)
@@ -142,13 +179,13 @@ def lam0_from_etas_p(p, mag: float, m0: float, b: float, horizon_days: float) ->
     return daily_at_mag / factor if factor else daily_at_mag
 
 
-def leftover_p(
+def garnish_p(
     lam0: float,
     feat_row: pd.Series | pd.DataFrame | dict,
     region_id: str,
     *,
     mag: float,
-    horizon_days: int = 7,
+    horizon_days: int = HORIZON_DAYS,
     root: Path | None = None,
 ) -> dict:
     cal = load_calibration(root)
@@ -156,19 +193,19 @@ def leftover_p(
     m0 = float(gr.get("m0") or 4.5)
     b = float(gr.get("b") or 1.0)
     scale = issued_scale(cal, "global" if region_id in {"global", ""} else region_id, horizon_days)
-    parts = leftover_gains(feat_row, region_id, root)
-    leftover = 1.0
+    parts = garnish_gains(feat_row, region_id, root)
+    combined = 1.0
     for gain in parts.values():
-        leftover *= float(gain)
+        combined *= float(gain)
     catalog = rate_to_p(lam0 * scale, mag, m0, b, horizon_days)
     etas = rate_to_p(lam0, mag, m0, b, horizon_days)
-    value = rate_to_p(lam0 * scale * leftover, mag, m0, b, horizon_days)
+    value = rate_to_p(lam0 * scale * combined, mag, m0, b, horizon_days)
     why = [GAIN_LABELS.get(name, name.replace("_", " ")) for name in parts]
     return {
-        "leftover_p": value,
+        "garnish_p": value,
         "catalog_p": catalog,
         "etas_p": etas,
-        "leftover_gain": leftover,
+        "garnish_gain": combined,
         "parts": [{"name": name, "label": GAIN_LABELS.get(name, name.replace("_", " ")), "gain": gain} for name, gain in parts.items()],
         "why": why,
     }

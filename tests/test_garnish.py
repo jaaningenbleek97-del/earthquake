@@ -1,5 +1,5 @@
 from eqpred.models.box_gain import apply_residual_gain, apply_trained_gain
-from eqpred.models.leftover import leftover_gains
+from eqpred.models.garnish import WATCH_FLAGS, garnish_gains, watch_list
 
 
 def test_trained_gain_applies_when_held_off_issued():
@@ -8,7 +8,7 @@ def test_trained_gain_applies_when_held_off_issued():
     assert apply_trained_gain(meta, 1.0) != 1.0
 
 
-def test_leftover_gains_include_space_weather():
+def test_garnish_gains_include_space_weather():
     row = {
         "spf_significant_window": 1,
         "proton_spike": 0,
@@ -24,6 +24,49 @@ def test_leftover_gains_include_space_weather():
         "energy_accel": 1.0,
         "tec_tecu": 7.0,
     }
-    parts = leftover_gains(row, "global")
+    parts = garnish_gains(row, "global")
     assert "space_weather" in parts
     assert parts["space_weather"] > 0
+
+
+def test_watch_list_covers_davidson_burns_and_high_value_flags():
+    ids = [key for key, _label in WATCH_FLAGS]
+    for required in (
+        "spf_significant_window",
+        "proton_spike",
+        "hss_on",
+        "flare_x_on",
+        "spe_on",
+        "solar_descending",
+        "solar_eclipse_window",
+        "volcano_unrest",
+        "dart_drop",
+        "sse_on",
+        "tremor_on",
+        "well_drop",
+        "scint_high",
+        "haarp_on",
+        "dvv_drop",
+        "wspr_quiet",
+        "wiki_hot",
+        "hydro_wet",
+        "roti_high",
+        "cal_payday",
+        "ulf_high",
+        "radon_high",
+        "grace_wet",
+        "so2_high",
+        "strain_pulse",
+        "era5_wet",
+        "olr_anomaly",
+        "gnss_dilatation",
+        "sunspot_hemisphere_skew",
+        "earth_state_unusual",
+        "graph_transfer_on",
+    ):
+        assert required in ids
+    flags = watch_list({"spf_significant_window": 1, "hss_on": 0, "volcano_unrest": 1})
+    on = {item["id"]: item["on"] for item in flags}
+    assert on["spf_significant_window"] is True
+    assert on["hss_on"] is False
+    assert on["volcano_unrest"] is True

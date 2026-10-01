@@ -79,6 +79,50 @@ def _first_version_at(versions: pd.DataFrame) -> pd.Series:
     return work.groupby("event_id")["version_at"].min()
 
 
+# ComCat's version feed does not reach back to 1990. For an older event its
+# earliest record is a bulk re-review (thousands share 2014-11-07), not the
+# first report, which would make a 1990 M6.5 look unknown until 2014. Trust a
+# version stamp only when it lands within a normal review window of the origin.
+VERSION_TRUST_DAYS = 365.0
+
+
+def _untrusted_version_ids(versions: pd.DataFrame) -> set[str]:
+    """Events whose earliest version record is a late bulk re-catalog stamp."""
+    if (
+        versions is None
+        or versions.empty
+        or "event_id" not in versions.columns
+        or "observed_at" not in versions.columns
+    ):
+        return set()
+    work = versions.copy()
+    work["event_id"] = work["event_id"].astype(str)
+    work["version_at"] = parse_utc(work["version_at"])
+    work["observed_at"] = parse_utc(work["observed_at"])
+    grouped = work.groupby("event_id").agg(
+        first_version=("version_at", "min"),
+        observed=("observed_at", "min"),
+    )
+    gap_days = (grouped["first_version"] - grouped["observed"]).dt.total_seconds() / 86400.0
+    return set(grouped.index[gap_days > VERSION_TRUST_DAYS])
+
+
+def _trusted_first_version(
+    frame: pd.DataFrame,
+    versions: pd.DataFrame,
+    first: pd.Series | None = None,
+) -> pd.Series:
+    """First `version_at` per row, blanked when it is a late bulk re-catalog stamp."""
+    if first is None:
+        first = _first_version_at(versions)
+    first = first.copy()
+    first.index = first.index.astype(str)
+    mapped = parse_utc(frame["event_id"].astype(str).map(first))
+    observed = parse_utc(frame["observed_at"])
+    gap_days = (mapped - observed).dt.total_seconds() / 86400.0
+    return mapped.where(gap_days <= VERSION_TRUST_DAYS)
+
+
 def apply_available_at(
     quakes: pd.DataFrame,
     versions: pd.DataFrame | None = None,
@@ -102,9 +146,7 @@ def apply_available_at(
         and "event_id" in out.columns
         and "event_id" in versions.columns
     ):
-        first = _first_version_at(versions)
-        first.index = first.index.astype(str)
-        mapped = parse_utc(out["event_id"].astype(str).map(first))
+        mapped = _trusted_first_version(out, versions)
         out["available_at"] = mapped.fillna(out["available_at"])
     return out
 
@@ -156,16 +198,19 @@ def catalog_asof(
     versioned_ids: set[str] = set()
     asof_ver = pd.DataFrame()
     if has_versions:
-        versioned_ids = set(versions["event_id"].dropna().astype(str))
+        # Events the feed only re-catalogued years later take the delay path
+        # below, otherwise a 1990 quake stays invisible until the re-review.
+        untrusted = _untrusted_version_ids(versions)
+        versioned_ids = set(versions["event_id"].dropna().astype(str)) - untrusted
         asof_ver = versions_asof(versions, cut)
         if not asof_ver.empty:
-            first = _first_version_at(versions)
             asof_ver = asof_ver.copy()
             asof_ver["event_id"] = asof_ver["event_id"].astype(str)
-            asof_ver["available_at"] = asof_ver["event_id"].map(first)
-            asof_ver["available_at"] = parse_utc(asof_ver["available_at"])
+            asof_ver = asof_ver.loc[asof_ver["event_id"].isin(versioned_ids)]
+        if not asof_ver.empty:
             asof_ver["observed_at"] = parse_utc(asof_ver["observed_at"])
             asof_ver["magnitude"] = pd.to_numeric(asof_ver["magnitude"], errors="coerce")
+            asof_ver["available_at"] = _trusted_first_version(asof_ver, versions)
 
     if "event_id" in quakes.columns and versioned_ids:
         eids = quakes["event_id"].astype(str)
@@ -225,9 +270,11 @@ def event_available_as(
     crossed = v.loc[ok].copy()
     crossed["event_id"] = crossed["event_id"].astype(str)
     first = crossed.sort_values("version_at").groupby("event_id")["version_at"].min()
-    mapped = work["event_id"].astype(str).map(first)
+    mapped = _trusted_first_version(work, versions, first=first)
     versioned = work["event_id"].astype(str).isin(versions["event_id"].astype(str))
-    return mapped.where(versioned, out)
+    # A stamp we do not trust falls back to the delay model, same as an
+    # unversioned event, instead of hiding the quake for years.
+    return mapped.where(versioned & mapped.notna(), out)
 
 
 def load_comcat_versions(root: Path | None = None) -> pd.DataFrame:

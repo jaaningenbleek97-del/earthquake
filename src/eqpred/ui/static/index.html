@@ -3,29 +3,28 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>This week’s leftover attempt — eqpred lab</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/style.css" />
+  <title>This week’s forecast — Earthquake prediction lab</title>
+  <link rel="stylesheet" href="/style.css?v=earth-v8" />
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
   <div class="chrome">
     <header class="top">
       <div class="brand">
-        <p class="eyebrow">eqpred prediction lab</p>
-        <h1>Can we predict large earthquakes?</h1>
-        <p class="lede" id="lede">Loading this week’s leftover attempt…</p>
+        <p class="eyebrow">Earthquake prediction lab</p>
+        <h1>This week’s forecast</h1>
+        <p class="lede" id="lede">Loading this week’s call…</p>
       </div>
       <div class="status-bar" id="status-bar" aria-live="polite"></div>
     </header>
     <nav class="tabs" role="tablist" aria-label="Lab sections">
       <button type="button" class="tab is-on" role="tab" aria-selected="true" data-tab="overview">This week</button>
-      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="scoreboard">Did we get it right?</button>
-      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="ledger">Every call</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="scoreboard">Results</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="ledger">All calls</button>
       <button type="button" class="tab" role="tab" aria-selected="false" data-tab="drivers">Signals</button>
-      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="lab">The lab</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="earth">Earth state</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="aftershock">Aftershocks</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="lab">Workshop</button>
     </nav>
   </div>
 
@@ -39,27 +38,31 @@
             <div class="globe-hud" id="globe-hud"></div>
           </div>
           <div class="globe-toolbar">
-            <button type="button" class="btn ghost" id="globe-nz">Look at New Zealand</button>
-            <button type="button" class="btn ghost" id="globe-earth">See the whole Earth</button>
-            <button type="button" class="btn ghost" id="globe-spin">Pause spin</button>
+            <button type="button" class="btn ghost" id="globe-nz">New Zealand</button>
+            <button type="button" class="btn ghost" id="globe-earth">Whole Earth</button>
+            <button type="button" class="btn ghost" id="globe-zoom-in" aria-label="Zoom globe in">Zoom in</button>
+            <button type="button" class="btn ghost" id="globe-zoom-out" aria-label="Zoom globe out">Zoom out</button>
+            <button type="button" class="btn ghost" id="globe-spin">Spin the Earth</button>
           </div>
           <p class="hint" id="globe-meta">Orange boxes are Hikurangi, the Alpine Fault, and Kermadec. Dots are recent large quakes. Japan and Chile are practice only, so they are not shown.</p>
         </div>
         <aside class="week-rail">
-          <div class="mode-switch" role="group" aria-label="Leftover lookback">
-            <button type="button" class="btn ghost is-on" data-leftover-mode="all" aria-pressed="true">All leftover memory</button>
-            <button type="button" class="btn ghost" data-leftover-mode="lastweek" aria-pressed="false">Last week only</button>
+          <div class="mode-switch" role="group" aria-label="How far back sensors look">
+            <button type="button" class="btn ghost is-on" data-fresh-mode="all" aria-pressed="true">Full history</button>
+            <button type="button" class="btn ghost" data-fresh-mode="lastweek" aria-pressed="false">Last 7 days of sensors</button>
           </div>
-          <div id="watch-strip" class="watch-strip"></div>
           <div id="week-global"></div>
           <div id="week-boxes"></div>
+          <p class="legend-line">The four cards are the frozen 30-day chances of a first large shock. Those are the ones we score. The 3-day row is frozen too. The working model can still change and does not replace either card.</p>
+          <div id="watch-strip" class="watch-strip"></div>
+          <div id="week-sidecars"></div>
           <p class="hint" id="week-empty" hidden>No this-week number yet.</p>
         </aside>
       </div>
 
       <details class="fold">
         <summary>What these numbers mean</summary>
-        <p>Leftover cards always show the leftover model’s <strong>attempt</strong>, even when it loses. <strong>Last week only</strong> ignores delayed leftover memory and uses just the past 7 days of leftover sources to call the next 7 days. Until leftover beats a constant guess on later years, the number we trust is the historical rate. Official ledger cards stay calibrated ETAS. Leftover still looks at space weather, tides, the ionosphere, GPS, neutron monitors, and anything else we can timestamp. The aftershock model is shown as “too late.” A chance of 24 in 100 means: in 100 similar weeks we would expect about 24 hits. It is not a public warning.</p>
+        <p>Each card is a <strong>30-day chance of a first large quake</strong> — not aftershocks of one that already happened. The published number uses every dated sensor we can replay, sitting on that morning’s typical five-year rate. We only score windows that have already finished, so a future quake cannot move today’s number. Japan and Chile test the method; they never get a live card. A chance of 24 in 100 means: in 100 similar months we would expect about 24 hits. This is a research product, not a public warning.</p>
       </details>
 
       <article class="card" id="day-card">
@@ -72,33 +75,38 @@
         <div id="day-out"></div>
       </article>
 
-      <article class="card">
-        <h2>Quiet-week alerts</h2>
-        <p class="hint">When the aftershock model is unusually quiet, we sometimes publish a separate alert. Overlapping alerts count as one episode, not a dozen lucky guesses. <em>Fresh</em> means the large quake was not just an aftershock of a recent one.</p>
+      <details class="fold">
+        <summary>Quiet-week alerts</summary>
+        <p class="hint">When the aftershock model is unusually quiet, we sometimes publish a separate alert. Overlapping alerts count as one episode. <em>Fresh</em> means the large quake was not just an aftershock of a recent one.</p>
         <div id="episode-out"></div>
-      </article>
+      </details>
     </section>
 
     <section id="scoreboard" class="panel" role="tabpanel">
       <header class="page-head">
         <h2>Did we get it right?</h2>
-        <p class="hint">These scores use weeks that have already finished. A high hit rate is not skill if we were “on alert” almost every day. The leftover model is scored on fresh big quakes, not aftershocks. Use <em>Last week only</em> to score leftover from just the past 7 days of leftover sources.</p>
+        <p class="hint">These scores use 30-day windows that have already finished. A high hit rate is not skill if we were “on alert” almost every day. Use <em>Last 7 days of sensors</em> to score the same model from only the past week of measurements.</p>
       </header>
       <article class="card" id="mainshock-card">
-        <h2>Did we catch the big quake?</h2>
-        <div class="mode-switch" role="group" aria-label="Leftover lookback">
-          <button type="button" class="btn ghost is-on" data-leftover-mode="all" aria-pressed="true">All leftover memory</button>
-          <button type="button" class="btn ghost" data-leftover-mode="lastweek" aria-pressed="false">Last week only</button>
+        <h2>Did we catch the first large quake?</h2>
+        <div class="mode-switch" role="group" aria-label="How far back sensors look">
+          <button type="button" class="btn ghost is-on" data-fresh-mode="all" aria-pressed="true">Full history</button>
+          <button type="button" class="btn ghost" data-fresh-mode="lastweek" aria-pressed="false">Last 7 days of sensors</button>
         </div>
-        <p class="hint" id="mainshock-note">The leftover model trains on old years and is replayed on later closed weeks. Aftershocks do not count as a hit.</p>
+        <p class="hint" id="mainshock-note">The model trains on old years and is replayed on later closed weeks. Aftershocks do not count as a hit.</p>
         <div id="mainshock-heads" class="grid heads"></div>
       </article>
       <article class="card" id="foreshock-card">
-        <h2>Catalog precursor — foreshock → fresh mainshock</h2>
-        <p class="hint" id="foreshock-note">This track looks at small and moderate quakes known that morning, in a box that has not just had a large shock. It is not leftover. Official ledger cards stay calibrated ETAS.</p>
+        <h2>Foreshock check — catalog only</h2>
+        <p class="hint" id="foreshock-note">This track looks at small and moderate quakes known that morning, and the shape of any active sequence. It is a catalog check, not the published forecast.</p>
         <div id="foreshock-heads" class="grid heads"></div>
       </article>
       <div id="head-cards" class="grid heads"></div>
+      <article class="card">
+        <h2>Standard forecast tests</h2>
+        <p class="hint" id="csep-note">Number, likelihood, timing, space, and ranking tests on non-overlapping 30-day windows.</p>
+        <div class="table-wrap"><table id="csep-table"></table></div>
+      </article>
       <article class="card">
         <h2>Fairness tests</h2>
         <p class="hint">We try to fool ourselves on purpose. If a shifted or fake catalog still “wins,” the edge is not real.</p>
@@ -106,7 +114,7 @@
       </article>
       <article class="card">
         <h2>Simple rules</h2>
-        <p class="hint">If this, then watch that box. Locked rows are product heads. Paper quiet-start rows are scored on <em>fresh</em> mainshocks, not aftershocks. Widening the quiet gate does not change issued cards.</p>
+        <p class="hint">If this, then watch that box. Locked rows are product heads. Quiet-start rows are scored on first large quakes, not aftershocks.</p>
         <div class="table-wrap"><table id="strategy-table"></table></div>
       </article>
       <article class="card">
@@ -160,7 +168,7 @@
     <section id="drivers" class="panel" role="tabpanel">
       <header class="page-head">
         <h2>Signals we watch</h2>
-        <p class="hint">Daily measurements known that morning. Shaded bands are solar-proton-flare window days. These are the leftover signals in our experimental call.</p>
+        <p class="hint">Daily measurements known that morning. The strip on This week is the short watch list. Shaded bands are solar polar-field window days.</p>
       </header>
       <div class="row">
         <label>From <input type="date" id="ser-start" /></label>
@@ -181,11 +189,47 @@
       </div>
     </section>
 
+    <section id="earth" class="panel" role="tabpanel">
+      <header class="page-head">
+        <h2>Earth state</h2>
+        <p class="hint">Three tools that never see earthquake labels. They describe a morning; they do not rewrite the published chance.</p>
+      </header>
+      <div id="earth-out"></div>
+    </section>
+
+    <section id="aftershock" class="panel" role="tabpanel">
+      <header class="page-head">
+        <h2>Aftershocks — a different question</h2>
+        <p class="hint">This page asks whether <em>any</em> qualifying quake happens in the next 30 days, including aftershocks, using only the catalogue. The published call on This week is the first-large-quake model and does not come from here.</p>
+      </header>
+      <article class="card">
+        <h2>What the aftershock model says this week</h2>
+        <p class="hint" id="aftershock-note">Not run yet.</p>
+        <div id="aftershock-heads" class="grid heads"></div>
+      </article>
+      <article class="card">
+        <h2>Is it any good at its own question?</h2>
+        <p class="hint">Scored on weeks that have already closed, against every qualifying quake — not against first shocks only. A lower error than the constant guess is the bar.</p>
+        <div class="table-wrap"><table id="aftershock-table"></table></div>
+      </article>
+      <article class="card">
+        <h2>What the model believes</h2>
+        <p class="hint">How often quakes start on their own, how strongly one quake triggers the next, and how fast that fades.</p>
+        <div class="table-wrap"><table id="aftershock-params"></table></div>
+      </article>
+    </section>
+
     <section id="lab" class="panel" role="tabpanel">
       <header class="page-head">
-        <h2>The lab</h2>
-        <p class="hint">Health checks, model versions, and the leftover hunt. Leftover cards show its attempt even when it loses. Official ledger cards stay calibrated ETAS so we can see if leftover is actually winning.</p>
+        <h2>Workshop</h2>
+        <p class="hint">Health checks, model versions, and research scans. Nothing here replaces the published chance unless Results already show it beat the typical year.</p>
       </header>
+      <nav class="lab-nav" aria-label="Workshop sections">
+        <button type="button" class="btn ghost" data-scroll="lab-watch">Publishing</button>
+        <button type="button" class="btn ghost" data-scroll="lab-hunt">Signal hunt</button>
+        <button type="button" class="btn ghost" data-scroll="lab-brain">Learner</button>
+        <button type="button" class="btn ghost" data-scroll="lab-backtest">Replay a week</button>
+      </nav>
       <div class="grid stats hero" id="stat-grid"></div>
       <div class="split">
         <article class="card" id="lab-watch">
@@ -205,24 +249,42 @@
       </details>
       <details class="fold">
         <summary>How a published chance is made</summary>
-        <p>Each row is a dated call: a week, a place, a magnitude floor, and either a chance or an alert. Earth-wide calls ask about magnitude 7+ in 7 days. Hikurangi and the Alpine Fault ask about magnitude 5+. Kermadec asks about magnitude 6+. Leftover cards show this week’s leftover attempt even when it loses. Official ledger cards stay calibrated ETAS. The ledger still stores the aftershock baseline next to it so we can score the experiment. When the model is in a quiet spell we may also say “this box stays quiet.” Japan and Chile are practice regions only — they never get a live card. Hits are judged on the final earthquake bulletin, not the first automatic location.</p>
+        <p>Each row is a dated call: a 30-day window, a place, a magnitude floor, and either a chance or an alert. Earth-wide calls ask about magnitude 7+. Hikurangi and the Alpine Fault ask about magnitude 5+. Kermadec asks about magnitude 6+. Hits are judged on the final earthquake bulletin, not the first automatic location.</p>
       </details>
 
       <article class="card" id="lab-hunt">
-        <h2>Leftover hunt — fresh big quake</h2>
-        <p class="hint">This scan ignores aftershock leftovers. Early train years propose a leftover connection. Late train years must point the same way — that is “confirmed.” Years after the train cut are a replay only; they do not pick the knob. A confirmed row is a correlation, not a forecast — leftover AI still has to beat a constant guess. Nothing here changes the official ledger until we promote it on purpose.</p>
+        <h2>Signal hunt — first large quake</h2>
+        <p class="hint">Looks at every source we have. Early years propose a link. Later train years must point the same way — that is “held.” A held row is a correlation, not a forecast, and it does not change the published number.</p>
         <div id="hunt-summary"></div>
-        <h3>Same sign on late train</h3>
-        <p class="hint">Looked real on early train years, and still pointed the same way on late train years. After-2018 replay is extra — it does not confirm the knob.</p>
+        <h3>Held on later train years</h3>
+        <p class="hint">Looked real on early years, and still pointed the same way later. After-2018 replay is extra — it does not confirm the link.</p>
         <div class="table-wrap"><table id="hunt-confirmed"></table></div>
         <h3>Loudest on old years</h3>
         <p class="hint">What the scan shouted loudest before we asked later years. Most of this is chance.</p>
         <div class="table-wrap"><table id="hunt-loudest"></table></div>
+        <h3>After subtracting the typical year</h3>
+        <p class="hint">Same sources, now asking what is left after the typical five-year rate. Includes quiet mornings and Earth-wide M8. Still research only.</p>
+        <div id="hunt-honest-summary"></div>
+        <div class="table-wrap"><table id="hunt-honest-confirmed"></table></div>
+        <h3>Grouped by family</h3>
+        <div class="table-wrap"><table id="hunt-honest-families"></table></div>
+      </article>
+
+      <article class="card" id="lab-hunt-sequence">
+        <h2>Signal hunt — foreshock sequences</h2>
+        <p class="hint">Looks only at sequence shape and catalog foreshock counts — not solar wind or TEC. A held row is a correlation, not a forecast.</p>
+        <div id="hunt-seq-summary"></div>
+        <h3>Held on later train years</h3>
+        <p class="hint">Looked real on early years, and still pointed the same way later.</p>
+        <div class="table-wrap"><table id="hunt-seq-confirmed"></table></div>
+        <h3>Loudest on old years</h3>
+        <p class="hint">What the sequence scan shouted loudest before we asked later years. Most of this is chance.</p>
+        <div class="table-wrap"><table id="hunt-seq-loudest"></table></div>
       </article>
 
       <article class="card" id="lab-backtest">
         <h2>Replay a finished week</h2>
-        <p class="hint">Cards wait for a live week to finish. This bench does not. It scores every later morning whose next 7 days are already in the catalog.</p>
+        <p class="hint">Cards wait for a live window to finish. This bench does not. It scores every later morning whose next 30 days are already in the catalog.</p>
         <div class="filters">
           <label>Signal
             <select id="bt-driver"></select>
@@ -265,8 +327,8 @@
       </article>
 
       <article class="card" id="lab-brain">
-        <h2>One learner, every leftover signal</h2>
-        <p class="hint">The hunt tests one knob. This leftover tree sees the rest together, then scores weeks that already closed. It does not write the published chance.</p>
+        <h2>One learner, every signal</h2>
+        <p class="hint">The hunt tests one knob at a time. This tree sees every source together, then fits what is left after the typical year. A last-two-week tree, an M8 track, and a quiet-start track sit beside it. It does not write the published chance.</p>
         <p class="banner" id="brain-banner"></p>
         <div class="row">
           <button type="button" id="brain-go" class="btn">Learn again</button>
@@ -301,6 +363,6 @@
 
   <script src="https://unpkg.com/globe.gl@2.41.4/dist/globe.gl.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script src="/app.js?v=tracks-123"></script>
+  <script src="/app.js?v=earth-v21"></script>
 </body>
 </html>

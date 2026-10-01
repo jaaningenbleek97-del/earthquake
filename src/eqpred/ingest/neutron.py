@@ -3,7 +3,7 @@ from __future__ import annotations
 """Daily neutron-monitor counts from the Oulu Cosmic Ray Station.
 
 Replayable CGI. Corrected counts are already adjusted for pressure and
-efficiency. A new leftover family — not another OMNI transform.
+efficiency. A new source family — not another OMNI transform.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -130,7 +130,7 @@ def pull_neutron(start: datetime, end: datetime, ingest_run_id: str) -> pd.DataF
             url = _query_url(station, chunk_start, inclusive_end)
             try:
                 text = fetch_text(url, timeout=180)
-            except Exception as exc:  # noqa: BLE001 — leftover overlay
+            except Exception as exc:  # noqa: BLE001 — optional overlay
                 print(f"  {SOURCE} skip {station} {chunk_start.date()}: {exc}")
                 continue
             frame = parse_oulu_csv(text, prefix)

@@ -5,10 +5,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from eqpred.features.bvalue import bvalue_frame
 from eqpred.features.coulomb import coulomb_frame
 from eqpred.features.cusp import cusp_frame
 from eqpred.features.davidson import apply_train_budget, field_strength, significant_windows
-from eqpred.features.leftover import leftover_derived, planetary_frame
+from eqpred.features.fresh import fresh_derived, planetary_frame
+from eqpred.features.gnss_strain import gnss_strain_columns
 from eqpred.features.nowcast import catalog_nowcast_frame
 from eqpred.features.migration import migration_frame
 from eqpred.catalog import apply_completeness, event_available_as, load_comcat, load_comcat_versions
@@ -79,7 +81,7 @@ def build_features(
     end = parse_utc(quakes["observed_at"]).max().floor("D")
     days = pd.date_range(start, end, freq="D", tz="UTC")
 
-    windows = significant_windows(spf, quakes, version="v2")
+    windows = significant_windows(spf, quakes, version="v2", train_end=train_end)
     strength = field_strength(spf)
     # Polar.html posts ~40 days late — do not alarm on a peak we have not seen.
     windows.index = pd.DatetimeIndex(windows.index) + pd.Timedelta(days=40)
@@ -117,7 +119,7 @@ def build_features(
             "f107",
         ],
     )
-    silso_asof = _asof_available(silso, days, ["sunspot_number"])
+    silso_asof = _asof_available(silso, days, ["sunspot_number", "sunspot_north", "sunspot_south"])
     geom_asof = _asof_available(
         geom,
         days,
@@ -127,6 +129,8 @@ def build_features(
             "lunar_declination_deg",
             "tidal_strain",
             "near_new_or_full",
+            "solar_eclipse_window",
+            "lunar_eclipse_geom",
         ],
     )
     feat = feat.merge(silso_asof, on="issue_time", how="left")
@@ -179,6 +183,18 @@ def build_features(
     feat["n_m6_7d"] = _count_available(quakes, feat["issue_time"], 6.0, 7, versions)
     feat["n_m7_30d"] = _count_available(quakes, feat["issue_time"], 7.0, 30, versions)
     feat["days_since_m7"] = _days_since(quakes, feat["issue_time"], 7.0, versions)
+    # Independent events only: strip aftershock swarms, keep first shocks / background.
+    # Causal decluster: an event is only an aftershock of something already reported.
+    from eqpred.eval.decluster import decluster_causal
+
+    fresh_quakes = decluster_causal(apply_completeness(quakes), space_km=200.0, time_days=10.0)
+    feat["n_fresh_m45_7d"] = _count_available(fresh_quakes, feat["issue_time"], 4.5, 7, versions)
+    feat["n_fresh_m45_30d"] = _count_available(fresh_quakes, feat["issue_time"], 4.5, 30, versions)
+    feat["n_fresh_m6_7d"] = _count_available(fresh_quakes, feat["issue_time"], 6.0, 7, versions)
+    feat["n_fresh_m6_30d"] = _count_available(fresh_quakes, feat["issue_time"], 6.0, 30, versions)
+    feat["n_fresh_m7_30d"] = _count_available(fresh_quakes, feat["issue_time"], 7.0, 30, versions)
+    feat["days_since_fresh_m7"] = _days_since(fresh_quakes, feat["issue_time"], 7.0, versions)
+    feat = feat.merge(bvalue_frame(fresh_quakes, feat["issue_time"]), on="issue_time", how="left")
     # Origin-time twin: same counts without the reporting delay. Hunt-only leakage check.
     origin = quakes.copy()
     origin["available_at"] = origin["observed_at"]
@@ -187,9 +203,18 @@ def build_features(
     feat = feat.merge(nowcast, on="issue_time", how="left")
     feat = feat.merge(migration_frame(feat["issue_time"], root=root), on="issue_time", how="left")
     feat = _join_wave2(feat, days, root)
+    feat = _join_pore(feat, days, root)
+    feat = _join_infrasound(feat, days, root)
+    feat = _join_schumann(feat, days, root)
+    from eqpred.eval.earth_state import attach_anomaly_features
+    from eqpred.features.graph import attach_graph_features
+
+    feat = attach_graph_features(feat, quakes, train_end=train_end)
+    feat = attach_anomaly_features(feat, train_end=train_end)
 
     dest = feature_dir(root) / "global_daily.parquet"
     dest.parent.mkdir(parents=True, exist_ok=True)
+    feat = feat.copy()
     feat.to_parquet(dest, index=False)
     return feat
 
@@ -225,6 +250,12 @@ def _join_wave2(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFram
         geonet = geonet.copy()
         geonet["available_at"] = parse_utc(geonet["available_at"])
         feat["n_geonet_m3_7d"] = _count_available(geonet, feat["issue_time"], 3.0, 7)
+        from eqpred.features.repeaters import days_since_hikurangi_repeater
+
+        # Clock only. Catalog family, so the issued stack does not read it.
+        feat["days_since_hikurangi_repeater"] = days_since_hikurangi_repeater(
+            geonet, feat["issue_time"]
+        )
 
     for source, slug in (("fdsn.japan", "japan"), ("fdsn.chile", "chile")):
         overlay = try_latest_raw(source, root)
@@ -251,6 +282,29 @@ def _join_wave2(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFram
             feat = feat.merge(aligned, on="issue_time", how="left")
 
     feat = _join_magnet(feat, days, root)
+    feat = _join_dart(feat, days, root)
+    feat = _join_volcano(feat, days, root)
+    feat = _join_swarm(feat, days, root)
+    feat = _join_cses(feat, days, root)
+    feat = _join_strain(feat, days, root)
+    feat = _join_radon(feat, days, root)
+    feat = _join_tremor(feat, days, root)
+    feat = _join_wells(feat, days, root)
+    feat = _join_cosmic2(feat, days, root)
+    feat = _join_haarp(feat, days, root)
+    feat = _join_dvv(feat, days, root)
+    feat = _join_wspr(feat, days, root)
+    feat = _join_wiki(feat, days, root)
+    feat = _join_hydro_surface(feat, days, root)
+    feat = _join_gnssa(feat, days, root)
+    feat = _join_roti(feat, days, root)
+    feat = _join_smap(feat, days, root)
+    feat = _join_superdarn(feat, days, root)
+    feat = _join_vlf(feat, days, root)
+    feat = _join_tir(feat, days, root)
+    feat = _join_tide(feat, days, root)
+    feat = _join_insar(feat, days, root)
+    feat = feat.copy()
 
     protons = try_latest_raw("noaa.goes_protons", root)
     if not protons.empty:
@@ -349,7 +403,7 @@ def _join_wave2(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFram
             feat = feat.merge(_asof_available(donki, days, cols), on="issue_time", how="left")
     planets = planetary_frame(pd.DatetimeIndex(feat["issue_time"]))
     feat = feat.merge(planets, on="issue_time", how="left")
-    return leftover_derived(feat)
+    return fresh_derived(feat)
 
 
 def _nz_gnss_mean(frame: pd.DataFrame) -> pd.DataFrame:
@@ -396,7 +450,7 @@ def _join_gnss(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame
             feat["gnss_east_7d"] = feat["gnss_east_mm"].diff(7)
 
     if ngl.empty or "site" not in ngl.columns:
-        return feat
+        return gnss_strain_columns(feat)
     for site, part in ngl.groupby("site"):
         slug = str(site).lower()
         cols = [c for c in ("east_mm", "north_mm", "vert_mm") if c in part.columns]
@@ -407,7 +461,8 @@ def _join_gnss(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame
         feat = feat.merge(aligned.rename(columns=rename), on="issue_time", how="left")
         if slug.upper() in SLOW_SLIP_SITES and f"gnss_{slug}_east_mm" in feat.columns:
             feat[f"gnss_{slug}_slowslip_30d"] = feat[f"gnss_{slug}_east_mm"].diff(30)
-    return feat
+    feat = feat.copy()
+    return gnss_strain_columns(feat)
 
 
 def _join_magnet(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
@@ -428,6 +483,361 @@ def _join_magnet(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFra
             feat = feat.merge(aligned.rename(columns=rename), on="issue_time", how="left")
     cols = value_cols + (["mag_station"] if "mag_station" in preferred.columns else [])
     aligned = _asof_available(preferred, days, cols)
+    return feat.merge(aligned, on="issue_time", how="left")
+
+
+def _join_swarm(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    swarm = try_latest_raw("esa.swarm", root)
+    if swarm.empty:
+        return feat
+    cols = [c for c in swarm.columns if str(c).startswith("swarm_")]
+    if not cols:
+        return feat
+    aligned = _asof_available(swarm, days, cols)
+    return feat.merge(aligned, on="issue_time", how="left")
+
+
+def _join_cses(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    cses = try_latest_raw("esa.cses", root)
+    if cses.empty:
+        return feat
+    cols = [c for c in cses.columns if str(c).startswith("cses_")]
+    if not cols:
+        return feat
+    aligned = _asof_available(cses, days, cols)
+    return feat.merge(aligned, on="issue_time", how="left")
+
+
+def _join_radon(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    radon = try_latest_raw("radon.public", root)
+    if radon.empty:
+        return feat
+    cols = [c for c in radon.columns if str(c).startswith("radon_")]
+    if not cols:
+        return feat
+    aligned = _asof_available(radon, days, cols)
+    return feat.merge(aligned, on="issue_time", how="left")
+
+
+def _join_tremor(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    tremor = try_latest_raw("eqdb.tremor", root)
+    if tremor.empty:
+        return feat
+    cols = [c for c in tremor.columns if str(c).startswith(("tremor_", "lfe_"))]
+    if not cols:
+        return feat
+    return feat.merge(_asof_available(tremor, days, cols), on="issue_time", how="left")
+
+
+def _join_wells(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    wells = try_latest_raw("hydro.wells", root)
+    if wells.empty:
+        return feat
+    value_cols = [c for c in ("well_level_m", "well_range_m", "well_d1_m") if c in wells.columns]
+    if not value_cols:
+        return feat
+    work = wells.copy()
+    work["available_at"] = (
+        parse_utc(work["available_at"]) if "available_at" in work.columns else parse_utc(work["observed_at"])
+    )
+    if "well_region" in work.columns:
+        nz = work.loc[work["well_region"].astype(str).isin(("hikurangi", "alpine", "kermadec"))]
+        if not nz.empty and "well_d1_m" in nz.columns:
+            nz_daily = (
+                nz.assign(_day=parse_utc(nz["observed_at"]).dt.floor("D"))
+                .groupby("_day", as_index=False)
+                .agg(well_nz_d1_m=("well_d1_m", "median"), available_at=("available_at", "min"))
+                .rename(columns={"_day": "observed_at"})
+            )
+            nz_daily["observed_at"] = pd.to_datetime(nz_daily["observed_at"], utc=True).dt.strftime(
+                "%Y-%m-%dT00:00:00Z"
+            )
+            feat = feat.merge(_asof_available(nz_daily, days, ["well_nz_d1_m"]), on="issue_time", how="left")
+    named = {col: (col, "median") for col in value_cols}
+    named["available_at"] = ("available_at", "min")
+    mean = (
+        work.assign(_day=parse_utc(work["observed_at"]).dt.floor("D"))
+        .groupby("_day", as_index=False)
+        .agg(**named)
+        .rename(columns={"_day": "observed_at"})
+    )
+    mean["observed_at"] = pd.to_datetime(mean["observed_at"], utc=True).dt.strftime("%Y-%m-%dT00:00:00Z")
+    return feat.merge(_asof_available(mean, days, value_cols), on="issue_time", how="left")
+
+
+def _join_cosmic2(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    cosmic = try_latest_raw("ucar.cosmic2", root)
+    if cosmic.empty:
+        return feat
+    cols = [c for c in cosmic.columns if str(c).startswith("scint_")]
+    if not cols:
+        return feat
+    return feat.merge(_asof_available(cosmic, days, cols), on="issue_time", how="left")
+
+
+def _join_haarp(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    haarp = try_latest_raw("gi.haarp", root)
+    if haarp.empty:
+        return feat
+    cols = [c for c in haarp.columns if str(c).startswith("haarp_")]
+    if not cols:
+        return feat
+    return feat.merge(_asof_available(haarp, days, cols), on="issue_time", how="left")
+
+
+def _join_dvv(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    dvv = try_latest_raw("geonet.dvv", root)
+    if dvv.empty:
+        return feat
+    cols = [c for c in dvv.columns if str(c).startswith("dvv_")]
+    if not cols:
+        return feat
+    return feat.merge(_asof_available(dvv, days, cols), on="issue_time", how="left")
+
+
+def _join_wspr(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    wspr = try_latest_raw("ham.wspr", root)
+    if wspr.empty:
+        return feat
+    cols = [c for c in wspr.columns if str(c).startswith("wspr_")]
+    if not cols:
+        return feat
+    return feat.merge(_asof_available(wspr, days, cols), on="issue_time", how="left")
+
+
+def _join_wiki(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    wiki = try_latest_raw("wiki.pageviews", root)
+    if wiki.empty:
+        return feat
+    cols = [
+        c
+        for c in wiki.columns
+        if str(c).startswith("wiki_") and pd.api.types.is_numeric_dtype(wiki[c])
+    ]
+    if not cols:
+        return feat
+    return feat.merge(_asof_available(wiki, days, cols), on="issue_time", how="left")
+
+
+def _join_prefix(feat: pd.DataFrame, days: pd.DatetimeIndex, source: str, prefix: str, root) -> pd.DataFrame:
+    raw = try_latest_raw(source, root)
+    if raw.empty:
+        return feat
+    cols = [c for c in raw.columns if str(c).startswith(prefix) and pd.api.types.is_numeric_dtype(raw[c])]
+    if not cols:
+        return feat
+    return feat.merge(_asof_available(raw, days, cols), on="issue_time", how="left")
+
+
+def _join_hydro_surface(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    return _join_prefix(feat, days, "hydro.surface", "hydro_", root)
+
+
+def _join_gnssa(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    return _join_prefix(feat, days, "mgds.gnssa", "gnssa_", root)
+
+
+def _join_roti(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    return _join_prefix(feat, days, "geonet.roti", "roti_", root)
+
+
+def _join_smap(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    return _join_prefix(feat, days, "nasa.smap", "smap_", root)
+
+
+def _join_superdarn(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    """Yesterday's Unwin gate share and speed. A later morning does not keep the last file."""
+    from eqpred.ingest.unwin import COLUMNS, unwin_daily
+
+    _ = days
+    return _attach_yesterday(feat, unwin_daily(root), list(COLUMNS))
+
+
+def _join_vlf(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    return _join_prefix(feat, days, "vlf.public", "vlf_", root)
+
+
+def _join_tir(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    return _join_prefix(feat, days, "nasa.tir", "tir_", root)
+
+
+def _join_tide(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    tide = try_latest_raw("uhslc.tide", root)
+    if tide.empty:
+        return feat
+    cols = [c for c in tide.columns if str(c).startswith("tide_")]
+    if not cols:
+        return feat
+    aligned = _asof_available(tide, days, cols)
+    feat = feat.merge(aligned, on="issue_time", how="left")
+    if "tide_nz_mm" in feat.columns:
+        feat["tide_nz_30d"] = feat["tide_nz_mm"].diff(30)
+    return feat
+
+
+def _join_insar(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    insar = try_latest_raw("comet.insar", root)
+    if insar.empty:
+        return feat
+    cols = [c for c in insar.columns if str(c).startswith("insar_")]
+    if not cols:
+        return feat
+    aligned = _asof_available(insar, days, cols)
+    feat = feat.merge(aligned, on="issue_time", how="left")
+    if "insar_los_mm" in feat.columns:
+        feat["insar_los_30d"] = feat["insar_los_mm"].diff(30)
+    return feat
+
+
+def _join_dart(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    dart = try_latest_raw("noaa.dart", root)
+    if dart.empty:
+        return feat
+    value_cols = [c for c in ("dart_height_m", "dart_range_m", "dart_d1_m") if c in dart.columns]
+    if not value_cols:
+        return feat
+    work = dart.copy()
+    work["available_at"] = parse_utc(work["available_at"]) if "available_at" in work.columns else parse_utc(work["observed_at"])
+    if "dart_station" in work.columns:
+        nz = work.loc[work["dart_station"].astype(str).str.upper().str.startswith("NZ")]
+        if not nz.empty and "dart_height_m" in nz.columns:
+            nz_daily = (
+                nz.assign(_day=parse_utc(nz["observed_at"]).dt.floor("D"))
+                .groupby("_day", as_index=False)
+                .agg(dart_nz_m=("dart_height_m", "mean"), available_at=("available_at", "min"))
+                .rename(columns={"_day": "observed_at"})
+            )
+            nz_daily["observed_at"] = pd.to_datetime(nz_daily["observed_at"], utc=True).dt.strftime(
+                "%Y-%m-%dT00:00:00Z"
+            )
+            feat = feat.merge(_asof_available(nz_daily, days, ["dart_nz_m"]), on="issue_time", how="left")
+        named = {}
+        for col in value_cols:
+            named[col] = (col, "min" if col == "dart_d1_m" else ("max" if col == "dart_range_m" else "mean"))
+        named["available_at"] = ("available_at", "min")
+        mean = (
+            work.assign(_day=parse_utc(work["observed_at"]).dt.floor("D"))
+            .groupby("_day", as_index=False)
+            .agg(**named)
+            .rename(columns={"_day": "observed_at"})
+        )
+        mean["observed_at"] = pd.to_datetime(mean["observed_at"], utc=True).dt.strftime("%Y-%m-%dT00:00:00Z")
+        work = mean
+    return feat.merge(_asof_available(work, days, value_cols), on="issue_time", how="left")
+
+
+def _join_volcano(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    volcano = try_latest_raw("si.gvp", root)
+    if volcano.empty:
+        return feat
+    cols = [c for c in volcano.columns if str(c).startswith("volcano_")]
+    if not cols:
+        return feat
+    return feat.merge(_asof_available(volcano, days, cols), on="issue_time", how="left")
+
+
+def _utc_day(stamps: pd.Series) -> pd.Series:
+    return parse_utc(stamps).dt.floor("D").astype("datetime64[ns, UTC]")
+
+
+def yesterday_frame(frame: pd.DataFrame, issue: pd.Series, columns: list[str]) -> pd.DataFrame:
+    """Yesterday's reading on this morning. A later morning does not keep the last value."""
+    issue_time = parse_utc(issue)
+    empty = pd.DataFrame({"issue_time": issue_time, **{c: np.nan for c in columns}})
+    if frame is None or frame.empty or "observed_at" not in getattr(frame, "columns", []):
+        return empty
+    work = frame.copy()
+    work["issue_time"] = _utc_day(work["observed_at"]) + pd.Timedelta(days=1)
+    cols = [c for c in columns if c in work.columns]
+    if not cols:
+        return empty
+    work = work[["issue_time", *cols]].dropna(subset=["issue_time"])
+    work = work.drop_duplicates("issue_time", keep="last")
+    left = pd.DataFrame({"issue_time": _utc_day(issue_time), "_row": np.arange(len(issue_time))})
+    merged = left.merge(work, on="issue_time", how="left").sort_values("_row")
+    out = pd.DataFrame({"issue_time": issue_time.to_numpy()})
+    for col in columns:
+        out[col] = pd.to_numeric(merged[col], errors="coerce").to_numpy() if col in merged.columns else np.nan
+    return out
+
+
+def _attach_yesterday(feat: pd.DataFrame, frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    cols = [c for c in columns if c in getattr(frame, "columns", [])]
+    if not cols:
+        return feat
+    aligned = yesterday_frame(frame, feat["issue_time"], cols)
+    feat = feat.drop(columns=[c for c in cols if c in feat.columns])
+    return feat.merge(aligned, on="issue_time", how="left")
+
+
+def _join_infrasound(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    """Previous day's station loudness. Eligible for the mainshock stack when the training years vary."""
+    from eqpred.ingest.infrasound import infrasound_daily
+
+    _ = days
+    from eqpred.ingest.geonet_infra import etvz_daily
+
+    frame = infrasound_daily(root)
+    extra = etvz_daily(root)
+    if not extra.empty:
+        cols = [c for c in extra.columns if str(c).startswith("infra_") and c != "infra_etvz_location"]
+        if frame.empty:
+            frame = extra
+        else:
+            frame = frame.merge(extra[["observed_at", *cols]], on="observed_at", how="outer")
+    cols = [c for c in frame.columns if str(c).startswith("infra_")]
+    return _attach_yesterday(feat, frame, cols)
+
+
+def _join_pore(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    """Borehole and seafloor pressure from the day before. Eligible when the training years have a reading."""
+    from eqpred.ingest.pore import pore_daily
+    from eqpred.ingest.seafloor import apg_daily, rbr_daily
+
+    _ = days
+    frame = pore_daily(root)
+    for extra in (apg_daily(root), rbr_daily(root)):
+        if extra is None or extra.empty:
+            continue
+        cols = [c for c in extra.columns if str(c).startswith("pore_")]
+        if frame.empty:
+            frame = extra
+        else:
+            frame = frame.merge(extra[["observed_at", *cols]], on="observed_at", how="outer")
+    cols = [c for c in frame.columns if str(c).startswith("pore_")]
+    return _attach_yesterday(feat, frame, cols)
+
+
+def _join_schumann(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    """Previous day's Schumann band ratio. Eligible when the training years overlap the archive."""
+    from eqpred.ingest.schumann import schumann_daily
+
+    _ = days
+    frame = schumann_daily(root)
+    return _attach_yesterday(feat, frame, ["schumann_mode1"])
+
+
+def _join_strain(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
+    strain = try_latest_raw("earthscope.strain", root)
+    if strain.empty:
+        return feat
+    value_cols = [
+        c
+        for c in ("strain_ee_nstrain", "strain_ee_range_nstrain", "strain_ee_dbdt_nstrain")
+        if c in strain.columns
+    ]
+    if not value_cols:
+        return feat
+    preferred = strain
+    if "strain_station" in strain.columns:
+        first = strain.loc[strain["strain_station"].astype(str).str.upper() == "B004"]
+        preferred = first if not first.empty else strain.drop_duplicates("observed_at")
+        for station, part in strain.groupby("strain_station"):
+            slug = str(station).lower()
+            aligned = _asof_available(part, days, value_cols)
+            rename = {c: c.replace("strain_", f"strain_{slug}_") for c in value_cols}
+            feat = feat.merge(aligned.rename(columns=rename), on="issue_time", how="left")
+    aligned = _asof_available(preferred, days, value_cols)
     return feat.merge(aligned, on="issue_time", how="left")
 
 

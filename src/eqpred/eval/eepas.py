@@ -66,6 +66,13 @@ def eepas_daily_rate(
     return rate
 
 
+def load_eepas(root: Path | None = None) -> dict[str, Any] | None:
+    path = data_dir(root) / "eval" / "eepas.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def run_eepas(
     train_end: str = "2018-12-31",
     holdout_start: str = "2019-01-01",
@@ -80,7 +87,10 @@ def run_eepas(
     days = pd.DatetimeIndex(feat["issue_time"])
     catalog_end = catalog["observed_at"].max()
     hold = (days + pd.Timedelta(days=HORIZON_DAYS) <= catalog_end) & (days >= utc_ts(holdout_start))
+    issued = {"global", "hikurangi", "alpine", "kermadec"}
+    latest = int(np.argmax(days.to_numpy())) if len(days) else None
     rows = []
+    week: list[dict[str, Any]] = []
     for rid, mag in TARGETS:
         region = REGIONS[rid]
         if region.get("kind") == "bbox":
@@ -110,6 +120,24 @@ def run_eepas(
         else:
             row["beats_etas"] = False
         rows.append(row)
+        if rid in issued and latest is not None and np.isfinite(p_eepas[latest]):
+            p_now = float(np.clip(p_eepas[latest], 1e-6, 1.0 - 1e-6))
+            week.append(
+                {
+                    "region": rid,
+                    "label": region.get("label") or rid,
+                    "magnitude_min": mag,
+                    "horizon_days": HORIZON_DAYS,
+                    "issue_day": days[latest].date().isoformat(),
+                    "p": p_now,
+                    "chance_plain": f"{int(round(p_now * 100))} in 100",
+                    "writes_issued_p": False,
+                    "sentence": (
+                        "Medium-term catalog (EEPAS) · 90 days · "
+                        "not the published 30-day number."
+                    ),
+                }
+            )
     beats = sum(1 for r in rows if r.get("beats_etas"))
     report = {
         "writes_issued_p": False,
@@ -118,6 +146,8 @@ def run_eepas(
         "n_holdout": int(hold.sum()),
         "n_beats_etas": beats,
         "regions": rows,
+        "week": week,
+        "card_label": "medium-term catalog (EEPAS) · 90 days · not the published 30-day number.",
         "scanned_at": iso(datetime.now(timezone.utc)),
         "note": (
             f"EEPAS 90d foil beat ETAS on {beats}/{len(rows)} targets. "

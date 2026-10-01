@@ -215,16 +215,25 @@ def test_parse_iaga2002_xyz_uses_horizontal():
     assert abs(minutes.iloc[0]["h_nt"] - 5000.0) < 1e-6
 
 
-def test_intermagnet_next_run_skips_dead_codes_and_asks_hourly():
+def test_intermagnet_next_run_skips_dead_codes_and_asks_minute():
     from eqpred.ingest.intermagnet import SKIP_STATIONS, STATIONS, _gin_data_url, _hapi_url
 
     assert "AMS" not in STATIONS and "IPM" not in STATIONS
     assert {"AMS", "IPM"} <= set(SKIP_STATIONS)
     start = datetime(2016, 1, 1, tzinfo=timezone.utc)
     gin = _gin_data_url("EYR", start, 31)
-    assert "samplesPerDay=Hour" in gin
+    assert "samplesPerDay=Minute" in gin
     hapi = _hapi_url("EYR", start, datetime(2016, 2, 1, tzinfo=timezone.utc))
-    assert "PT1H" in hapi
+    assert "PT1M" in hapi
+    assert "PT1H" not in hapi
+
+
+def test_eac4_end_stops_inside_ads_lag():
+    from eqpred.ingest.so2 import eac4_end
+
+    now = datetime(2026, 9, 16, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 17, tzinfo=timezone.utc)
+    assert eac4_end(end, now=now) == datetime(2026, 6, 28, tzinfo=timezone.utc)
 
 
 def test_parse_iaga2002_empty_garbage():

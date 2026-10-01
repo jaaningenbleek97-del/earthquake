@@ -19,10 +19,11 @@ dependencies = [
   "netCDF4>=1.6",
   "truststore>=0.10",
   "rdata>=0.11",
+  "viresclient>=0.16",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 eqpred = "eqpred.cli:main"

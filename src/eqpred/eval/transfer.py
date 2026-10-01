@@ -128,13 +128,13 @@ def run_transfer(
     elif beats:
         names = ", ".join(f"{r['train_label']}→{r['score_label']}" for r in beats)
         report["note"] = (
-            f"Transfer beat ETAS leftover error on {len(beats)} pair(s): {names}. "
+            f"Transfer beat ETAS error on {len(beats)} pair(s): {names}. "
             "Same unconventional stack, other catalog. Issued p is unchanged."
         )
     else:
         report["note"] = (
-            "Train one arc and score the other did not beat ETAS leftover error. "
-            "The leftover is not a shared Sun signal we can move. Issued p is unchanged."
+            "Train one arc and score the other did not beat ETAS error. "
+            "The signal is not a shared Sun signal we can move. Issued p is unchanged."
         )
     dest = data_dir(root) / "eval"
     dest.mkdir(parents=True, exist_ok=True)

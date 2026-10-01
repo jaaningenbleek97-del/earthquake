@@ -1,10 +1,16 @@
 const $ = (id) => document.getElementById(id);
 
-const TABS = ["overview", "scoreboard", "ledger", "drivers", "lab"];
-const ALIASES = { map: "overview", hunt: "lab", backtest: "lab", brain: "lab" };
-const LAB_ANCHORS = { hunt: "lab-hunt", backtest: "lab-backtest", brain: "lab-brain" };
+function freshAcc(row) {
+  if (!row) return null;
+  return row.fresh_acc ?? row.leftover_acc ?? null;
+}
+
+
+const TABS = ["overview", "scoreboard", "ledger", "drivers", "earth", "aftershock", "lab"];
+const ALIASES = { map: "overview", hunt: "lab", backtest: "lab", brain: "lab", sequence: "lab", analog: "earth", anomaly: "earth", graph: "earth" };
+const LAB_ANCHORS = { hunt: "lab-hunt", sequence: "lab-hunt-sequence", backtest: "lab-backtest", brain: "lab-brain", watch: "lab-watch" };
 const FILTER_STORE = "eqpred.ledger.filters";
-const MODE_STORE = "eqpred.leftover.mode";
+const MODE_STORE = "eqpred.fresh.mode";
 const DRIVER_PLAIN = {
   etas_calibrated: "aftershock model",
   human: "a person",
@@ -14,13 +20,13 @@ const state = {
   snap: null,
   globeData: null,
   globe: null,
-  globeSpin: true,
+  globeSpin: false,
   offset: 0,
   charts: {},
   tab: "overview",
   selectedDay: "",
   selectedBox: "",
-  leftoverMode: "all",
+  freshMode: "all",
 };
 
 function formatDriver(item) {
@@ -45,22 +51,25 @@ function emptyRow(cols, text) {
 }
 
 function promoteLine(p) {
-  const ms = state.snap?.mainshock;
-  if (leftoverMode() === "lastweek" && ms?.last_week?.note) return ms.last_week.note;
-  if (ms?.note) return ms.note;
-  const held = state.globeData?.copy?.held ?? leftoverWeekHeld();
-  if (held) return "Leftover cards show its attempt even when it loses. The historical rate is still the number we trust.";
-  if (!p) return "The leftover model is trying to catch a fresh big quake. Aftershock rates are not the product.";
-  if (p.pass) return "A leftover gate passed. The leftover call is still the experiment on the globe.";
-  return "The leftover model is on the globe. Aftershock rates are the skeptic we refuse to ship.";
+  if (freshMode() === "lastweek") {
+    return "These cards use only the last 7 days of sensors to call the next 30 days. They stay research-only unless Results show they beat a typical year.";
+  }
+  const held = state.globeData?.copy?.held ?? freshWeekHeld();
+  if (held) {
+    return "The published chance is our official call. It has not beaten a typical year on later mornings yet, so that typical rate sits beside each number.";
+  }
+  if (p?.pass) {
+    return "Later years preferred the model over a typical year. The published chance is still the official call.";
+  }
+  return "The published chance is our official call for a first large quake. The aftershock model is a second opinion only.";
 }
 
-function leftoverMode() {
-  return state.leftoverMode === "lastweek" ? "lastweek" : "all";
+function freshMode() {
+  return state.freshMode === "lastweek" ? "lastweek" : "all";
 }
 
-function leftoverWeekHeld() {
-  const last = leftoverMode() === "lastweek";
+function freshWeekHeld() {
+  const last = freshMode() === "lastweek";
   const week = last
     ? (state.snap?.mainshock?.last_week?.week || state.globeData?.last_week?.week || [])
     : (state.snap?.mainshock?.week || state.globeData?.week || []);
@@ -72,48 +81,73 @@ function leftoverWeekHeld() {
   return issued.every((w) => w.held_to_climatology);
 }
 
-function leftoverView(card) {
-  if (leftoverMode() === "lastweek" && card && card.last_week_p != null) {
+function freshView(card) {
+  if (freshMode() === "lastweek" && card && card.last_week_p != null) {
     return {
       chance: card.last_week_chance_plain,
       sentence: card.last_week_sentence,
       why: card.last_week_why || [],
       held: card.last_week_held,
+      week_state: card.last_week_state || card.week_state,
+      p: card.last_week_p,
+      climatology_p: card.last_week_climatology_p ?? card.climatology_p,
       climate: card.last_week_climatology_chance_plain || card.climatology_chance_plain,
+      attempt: card.last_week_raw_chance_plain,
+      traffic: card.traffic_sentence,
     };
   }
   return {
-    chance: card?.leftover_chance_plain || card?.chance_plain,
-    sentence: card?.leftover_sentence || card?.sentence,
-    why: card?.leftover_why || [],
+    chance: card?.fresh_chance_plain || card?.leftover_chance_plain || card?.chance_plain,
+    sentence: card?.fresh_sentence || card?.leftover_sentence || card?.sentence,
+    why: card?.fresh_why || card?.leftover_why || [],
     held: card?.held_to_climatology,
+    week_state: card?.week_state,
+    p: card?.fresh_p ?? card?.fresh_raw_p,
+    climatology_p: card?.climatology_p,
     climate: card?.climatology_chance_plain,
-  };
+    attempt: card?.fresh_raw_chance_plain,
+      traffic: card?.traffic_sentence,
+      wait: card?.wait_plain,
+      neighborhood: card?.neighborhood_plain,
+    };
+  }
+
+function inferredWeekState(card) {
+  if (!card) return "rate";
+  if (card.week_state === "beat" || card.week_state === "moved" || card.week_state === "rate") {
+    return card.week_state;
+  }
+  const p = card.p ?? card.fresh_raw_p;
+  const climate = card.climatology_p;
+  const left = p != null && climate != null && Math.abs(Number(p) - Number(climate)) >= 1e-4;
+  const held = card.held_to_climatology ?? card.held;
+  if (!held) return "beat";
+  return left ? "moved" : "rate";
 }
 
 function chanceKind(card) {
-  const last = leftoverMode() === "lastweek";
-  if (card?.held_to_climatology) {
-    return last
-      ? "last-week leftover attempt (does not beat the historical rate)"
-      : "leftover attempt this week (does not beat the historical rate)";
-  }
-  return last ? "last-week leftover call" : "leftover call this week";
+  const last = freshMode() === "lastweek";
+  const prefix = last ? "last 7 days of sensors" : "published chance";
+  const state = inferredWeekState(card);
+  if (state === "beat") return `${prefix} · moved and beat a typical year`;
+  if (state === "moved") return `${prefix} · moved, has not beaten the rate yet`;
+  if (state === "rate" || card?.held_to_climatology) return `${prefix} · did not leave the rate`;
+  return last ? "last 7 days of sensors · next 30 days" : "published chance · next 30 days";
 }
 
 function syncModeButtons() {
-  const last = leftoverMode() === "lastweek";
-  document.querySelectorAll("[data-leftover-mode]").forEach((btn) => {
-    const on = btn.dataset.leftoverMode === (last ? "lastweek" : "all");
+  const last = freshMode() === "lastweek";
+  document.querySelectorAll("[data-fresh-mode]").forEach((btn) => {
+    const on = btn.dataset.freshMode === (last ? "lastweek" : "all");
     btn.classList.toggle("is-on", on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   });
 }
 
-function setLeftoverMode(mode) {
-  state.leftoverMode = mode === "lastweek" ? "lastweek" : "all";
+function setFreshMode(mode) {
+  state.freshMode = mode === "lastweek" ? "lastweek" : "all";
   try {
-    localStorage.setItem(MODE_STORE, state.leftoverMode);
+    localStorage.setItem(MODE_STORE, state.freshMode);
   } catch (_) {
     /* ignore */
   }
@@ -123,7 +157,7 @@ function setLeftoverMode(mode) {
 }
 
 function activeCopy(data) {
-  if (leftoverMode() === "lastweek") {
+  if (freshMode() === "lastweek") {
     return data?.last_week?.copy || state.globeData?.last_week?.copy || null;
   }
   return data?.copy || state.globeData?.copy || null;
@@ -132,7 +166,7 @@ function activeCopy(data) {
 function applyCopy(copy) {
   if (!copy) return;
   if (copy.lede && $("lede")) $("lede").textContent = copy.lede;
-  if (copy.title) document.title = `${copy.title} — eqpred lab`;
+  if (copy.title) document.title = `${copy.title} — Earthquake prediction lab`;
 }
 
 function parseHash() {
@@ -268,9 +302,23 @@ async function loadFreshHunt(snap) {
       return pack;
     }
   } catch (_) {
-    /* leftover hunt file may not exist yet */
+    /* hunt file may not exist yet */
   }
   return snap.hunt;
+}
+
+async function loadSequenceHunt(snap) {
+  if (snap?.hunt_sequence?.n_tests) return snap.hunt_sequence;
+  try {
+    const pack = await get("/api/hunt?sequence=1");
+    if (pack?.n_tests) {
+      snap.hunt_sequence = pack;
+      return pack;
+    }
+  } catch (_) {
+    /* sequence hunt file may not exist yet */
+  }
+  return snap.hunt_sequence;
 }
 
 async function get(url, tries = 3) {
@@ -335,7 +383,7 @@ function renderRegistry(reg) {
 }
 
 function huntRow(row) {
-  const family = row.aftershock_shaped ? "catalog leftover" : row.family;
+  const family = row.aftershock_shaped ? "aftershock counts" : row.family;
   const pill = row.aftershock_shaped ? "miss" : (row.confirmed ? "fresh" : "open");
   return `<tr class="hunt-row" data-driver="${row.driver}" data-lag="${row.lag_days}" data-region="${row.region}">
     <td><strong>${row.driver}</strong><div class="hint">lag ${row.lag_days}d · ${row.region} M≥${row.magnitude_min} · click to replay</div></td>
@@ -345,10 +393,10 @@ function huntRow(row) {
   </tr>`;
 }
 
-function renderHunt(hunt) {
-  const summary = $("hunt-summary");
-  const confirmedEl = $("hunt-confirmed");
-  const loudEl = $("hunt-loudest");
+function renderHunt(hunt, prefix = "hunt") {
+  const summary = $(`${prefix}-summary`);
+  const confirmedEl = $(`${prefix}-confirmed`);
+  const loudEl = $(`${prefix}-loudest`);
   if (!summary || !confirmedEl || !loudEl) return;
   if (!hunt) {
     summary.innerHTML = "<p class=\"empty\">No hunt on disk yet.</p>";
@@ -359,14 +407,17 @@ function renderHunt(hunt) {
   const families = Object.entries(hunt.family_counts || {})
     .map(([name, n]) => `${name} ${n}`)
     .join(" · ");
+  const held = prefix === "hunt-seq" ? (hunt.n_confirmed_sequence ?? hunt.n_confirmed ?? 0) : (hunt.n_confirmed_unconventional || 0);
+  const heldLabel = prefix === "hunt-seq" ? "sequence objects held" : "not just aftershocks";
   summary.innerHTML = `<div class="watch-list">
     <div class="watch-row"><span class="src">signals</span><span class="lag">${hunt.n_knobs ?? "—"} columns</span></div>
     <div class="watch-row"><span class="src">tests</span><span class="lag">${hunt.n_tests ?? "—"} (signal × lag × place)</span></div>
     <div class="watch-row"><span class="src">looked real on old years</span><span class="lag">${hunt.n_discovered ?? 0}</span></div>
-    <div class="watch-row"><span class="src">same sign on late train</span><span class="pill fresh">${hunt.n_confirmed ?? 0}</span></div>
+    <div class="watch-row"><span class="src">held on later train years</span><span class="pill fresh">${hunt.n_confirmed ?? 0}</span></div>
     <div class="watch-row"><span class="src">still true after train cut</span><span class="pill ${(hunt.n_replayed || 0) ? "fresh" : "open"}">${hunt.n_replayed ?? 0}</span></div>
-    <div class="watch-row"><span class="src">not just aftershocks</span><span class="pill ${(hunt.n_confirmed_unconventional || 0) ? "fresh" : "open"}">${hunt.n_confirmed_unconventional ?? 0}</span></div>
-    ${hunt.fresh ? `<div class="watch-row"><span class="src">target</span><span class="pill fresh">fresh mainshock</span></div>` : ""}
+    <div class="watch-row"><span class="src">${heldLabel}</span><span class="pill ${held ? "fresh" : "open"}">${held}</span></div>
+    ${hunt.sequence ? `<div class="watch-row"><span class="src">target</span><span class="pill fresh">foreshock / sequence</span></div>` : (hunt.fresh ? `<div class="watch-row"><span class="src">target</span><span class="pill fresh">first large quake</span></div>` : "")}
+    <div class="watch-row"><span class="src">writes the published chance</span><span class="pill open">no</span></div>
     <div class="watch-row"><span class="src">families</span><span class="lag">${families || "—"}</span></div>
   </div>`;
   const confirmed = (hunt.confirmed || []).slice(0, 40);
@@ -376,13 +427,50 @@ function renderHunt(hunt) {
   loudEl.innerHTML = `<thead><tr><th>Signal</th><th>Family</th><th>Old years</th><th>Later years</th></tr></thead><tbody>${
     (hunt.loudest_train || []).map(huntRow).join("")
   }</tbody>`;
-  document.querySelectorAll(".hunt-row").forEach((row) => {
-    row.addEventListener("click", () => {
-      $("bt-driver").value = row.dataset.driver;
-      $("bt-lag").value = String(row.dataset.lag);
-      $("bt-region").value = row.dataset.region;
-      showTab("lab", "backtest");
-      runBacktest();
+  if (prefix === "hunt") {
+    const honest = hunt.honest;
+    const honestSummary = $("hunt-honest-summary");
+    const honestConfirmed = $("hunt-honest-confirmed");
+    const honestFamilies = $("hunt-honest-families");
+    if (honestSummary) {
+      if (!honest) {
+        honestSummary.innerHTML = "<p class=\"empty\">No leftover-after-typical-year hunt on disk yet.</p>";
+      } else {
+        honestSummary.innerHTML = `<div class="watch-list">
+          <div class="watch-row"><span class="src">sources kept</span><span class="lag">${honest.n_knobs ?? "—"} columns · ${honest.n_families ?? 0} families</span></div>
+          <div class="watch-row"><span class="src">leftover tests</span><span class="lag">${honest.n_tests ?? "—"}</span></div>
+          <div class="watch-row"><span class="src">held on later train years</span><span class="pill ${(honest.n_confirmed || 0) ? "fresh" : "open"}">${honest.n_confirmed ?? 0}</span></div>
+          <div class="watch-row"><span class="src">beat a typical year</span><span class="pill ${(honest.n_beats_climate || 0) ? "fresh" : "open"}">${honest.n_beats_climate ?? 0}</span></div>
+          <div class="watch-row"><span class="src">grouped by family</span><span class="lag">${honest.n_confirmed_family ?? 0}</span></div>
+          <div class="watch-row"><span class="src">quiet mornings</span><span class="lag">${honest.n_confirmed_quiet ?? 0}</span></div>
+          <div class="watch-row"><span class="src">Earth-wide M8</span><span class="lag">${honest.n_confirmed_m8 ?? 0}</span></div>
+          <div class="watch-row"><span class="src">writes the published chance</span><span class="pill open">no</span></div>
+        </div>`;
+      }
+    }
+    if (honestConfirmed) {
+      const rows = (honest?.confirmed || []).slice(0, 40);
+      honestConfirmed.innerHTML = `<thead><tr><th>Signal</th><th>Family</th><th>Old years</th><th>Later years</th></tr></thead><tbody>${
+        rows.length ? rows.map(huntRow).join("") : emptyRow(4, "Nothing beat the residual test yet.")
+      }</tbody>`;
+    }
+    if (honestFamilies) {
+      const rows = (honest?.families || []).slice(0, 40);
+      honestFamilies.innerHTML = `<thead><tr><th>Signal</th><th>Family</th><th>Old years</th><th>Later years</th></tr></thead><tbody>${
+        rows.length ? rows.map(huntRow).join("") : emptyRow(4, "No family stack held.")
+      }</tbody>`;
+    }
+  }
+  const extraTables = prefix === "hunt" ? [$("hunt-honest-confirmed"), $("hunt-honest-families")] : [];
+  [confirmedEl, loudEl, ...extraTables.filter(Boolean)].forEach((table) => {
+    table.querySelectorAll(".hunt-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        $("bt-driver").value = row.dataset.driver;
+        $("bt-lag").value = String(row.dataset.lag);
+        $("bt-region").value = row.dataset.region;
+        showTab("lab", "backtest");
+        runBacktest();
+      });
     });
   });
 }
@@ -432,7 +520,7 @@ function renderTrade(trade) {
     <div class="stat"><div class="k">time on</div><div class="v">${pct(trade.time_in_alarm)}</div></div>
   </div>
   <p class="hint">${trade.note} Aimed at ${(trade.share * 100).toFixed(0)}% of old years; later years it was on ${pct(trade.time_in_alarm)}. Threshold ${num(trade.threshold, 3)} (${trade.side} tail) · ${trade.family} · ${trade.n_days} finished weeks.</p>
-  ${recent ? `<div class="table-wrap"><table><thead><tr><th>Morning</th><th>Signal</th><th>Next 7 days</th></tr></thead><tbody>${recent}</tbody></table></div>` : ""}`;
+  ${recent ? `<div class="table-wrap"><table><thead><tr><th>Morning</th><th>Signal</th><th>Next ${trade.horizon_days || 30} days</th></tr></thead><tbody>${recent}</tbody></table></div>` : ""}`;
 }
 
 async function runBacktest() {
@@ -495,7 +583,7 @@ function renderBrain(brain) {
     stats.innerHTML = "";
     if (conn) conn.innerHTML = `<thead><tr><th>Connection</th><th>Family</th><th>Place</th><th>Weight</th></tr></thead><tbody>${emptyRow(4, "No learn on disk.")}</tbody>`;
     if (exp) exp.innerHTML = `<thead><tr><th>Try</th><th>On</th><th>Hits</th><th>Vs always-on</th></tr></thead><tbody>${emptyRow(4, "No experiments yet.")}</tbody>`;
-    if (journalEl) journalEl.innerHTML = `<thead><tr><th>When</th><th>Lift</th><th>Leftover error</th><th>Walk-forward</th></tr></thead><tbody>${emptyRow(4, "No journal yet.")}</tbody>`;
+    if (journalEl) journalEl.innerHTML = `<thead><tr><th>When</th><th>Lift</th><th>Model error</th><th>Walk-forward</th></tr></thead><tbody>${emptyRow(4, "No journal yet.")}</tbody>`;
     return;
   }
   note.textContent = brain.note || "";
@@ -504,12 +592,16 @@ function renderBrain(brain) {
   stats.innerHTML = [
     ["signals", brain.n_features],
     ["later lift", lift == null ? "—" : `${(lift * 100).toFixed(1)} pt`],
-    ["leftover error", brain.locked_brier == null ? "—" : num(brain.locked_brier, 4)],
+    ["first-shock error", brain.locked_brier == null ? "—" : num(brain.locked_brier, 4)],
+    ["typical-year error", brain.locked_climate_brier == null ? "—" : num(brain.locked_climate_brier, 4)],
     ["aftershock-model error", brain.locked_etas_brier == null ? "—" : num(brain.locked_etas_brier, 4)],
     ["walk-forward lift", wf.mean_lift == null ? "—" : `${(wf.mean_lift * 100).toFixed(1)} pt`],
     ["journal", `${brain.journal_runs ?? 0} runs`],
     ["improving", brain.improved == null ? "first run" : brain.improved ? "yes" : "not this time"],
     ["quiet lift", brain.quiet?.locked_lift == null ? "—" : `${(brain.quiet.locked_lift * 100).toFixed(1)} pt`],
+    ["quiet-morning lift", brain.quiet_start?.locked_lift == null ? "—" : `${(brain.quiet_start.locked_lift * 100).toFixed(1)} pt`],
+    ["last-two-week error", brain.recent?.locked_brier == null ? "—" : num(brain.recent.locked_brier, 4)],
+    ["M8 error", brain.rare?.locked_brier == null ? "—" : num(brain.rare.locked_brier, 4)],
     ["published chance", "unchanged"],
   ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   const promoteEl = $("promote-note");
@@ -546,7 +638,7 @@ function renderBrain(brain) {
   }
   if (journalEl) {
     const rows = brain.journal || [];
-    journalEl.innerHTML = `<thead><tr><th>When</th><th>Lift</th><th>Leftover error</th><th>Walk-forward</th></tr></thead><tbody>${
+    journalEl.innerHTML = `<thead><tr><th>When</th><th>Lift</th><th>Model error</th><th>Walk-forward</th></tr></thead><tbody>${
       rows.length
         ? rows.map((j) => `<tr>
           <td>${(j.ran_at || "").slice(0, 19)}</td>
@@ -646,9 +738,9 @@ function renderStatusBar(snap) {
   const watchOk = Boolean(snap.watchdog?.ok);
   const held = !snap.promote?.pass;
   el.innerHTML = `
-    <span class="chip ${held ? "hold" : "ok"}"><strong>${held ? "Chance unchanged" : "Gate passed"}</strong></span>
-    <span class="chip ${watchOk ? "ok" : "warn"}"><strong>${watchOk ? "Ready to publish" : "Too stale to publish"}</strong></span>
-    <span class="chip"><strong>${scored}</strong> finished · ${open} waiting</span>
+    <span class="chip ${held ? "hold" : "ok"}"><strong>${held ? "Typical year still wins" : "Model beat a typical year"}</strong></span>
+    <span class="chip ${watchOk ? "ok" : "warn"}"><strong>${watchOk ? "Feeds are fresh" : "Feeds too old to publish"}</strong></span>
+    <span class="chip"><strong>${scored}</strong> finished windows · ${open} waiting</span>
   `;
 }
 
@@ -688,12 +780,30 @@ function resizeGlobe() {
   state.globe.height(el.clientHeight);
 }
 
-function lookAtNZ() {
-  state.globe?.pointOfView({ lat: -40.5, lng: 174.5, altitude: 1.65 }, 900);
+function lookAtNZ(ms = 900) {
+  state.globe?.pointOfView({ lat: -41.2, lng: 174, altitude: 0.95 }, ms);
 }
 
 function lookAtEarth() {
   state.globe?.pointOfView({ lat: -20, lng: 170, altitude: 2.5 }, 900);
+}
+
+const GLOBE_ALT_MIN = 0.35;
+const GLOBE_ALT_MAX = 4.5;
+const GLOBE_ZOOM_IN = 0.72;
+const GLOBE_ZOOM_OUT = 1.38;
+
+function zoomGlobe(factor) {
+  if (!state.globe?.pointOfView) return;
+  const view = state.globe.pointOfView() || {};
+  const altitude = Math.min(
+    GLOBE_ALT_MAX,
+    Math.max(GLOBE_ALT_MIN, Number(view.altitude || 1.65) * factor),
+  );
+  state.globe.pointOfView(
+    { lat: view.lat, lng: view.lng, altitude },
+    350,
+  );
 }
 
 function setGlobeSpin(on) {
@@ -715,49 +825,278 @@ function selectBox(id) {
   const hud = $("globe-hud");
   if (hud && box) {
     const card = box.card;
-    const view = card && leftoverView(card);
-    const hero = view?.chance || (card && (card.leftover_chance_plain || card.chance_plain || chance(card.value)));
+    const view = card && freshView(card);
+    const hero = view?.chance || (card && (card.fresh_chance_plain || card.leftover_chance_plain || card.chance_plain || chance(card.value)));
     hud.innerHTML = card
-      ? `<article class="call-card is-on"><p class="where">${box.label}</p><div class="chance">${hero}<small>${chanceKind({ held_to_climatology: view?.held })}</small></div></article>`
+      ? `<article class="call-card is-on"><p class="where">${box.label}</p><div class="chance">${hero}<small>${chanceKind(view)}</small></div></article>`
       : "";
   }
 }
 
 function heroChance(card) {
-  const view = leftoverView(card);
-  return view.chance || card.leftover_chance_plain || card.chance_plain || chance(card.value);
+  const view = freshView(card);
+  return view.chance || card.fresh_chance_plain || card.leftover_chance_plain || card.chance_plain || chance(card.value);
+}
+
+function renderEarth(pack) {
+  const el = $("earth-out");
+  if (!el) return;
+  if (!pack || !pack.issue_day) {
+    el.innerHTML = `<p class="empty">${pack?.note || "Run <code>eqpred analog</code> to fit the Earth-state tools."}</p>`;
+    return;
+  }
+  const anom = pack.anomaly || {};
+  const graph = pack.graph || {};
+  const analogs = pack.analogs || [];
+  const regions = pack.regions || [];
+  const analogRows = analogs.map((row) => {
+    const followed = ["global", "hikurangi", "alpine", "kermadec"]
+      .filter((rid) => row[`followed_${rid}`])
+      .map((rid) => rid)
+      .join(", ") || "quiet";
+    return `<tr><td>${row.issue_day || "—"}</td><td>${num(row.distance, 2)}</td><td>${followed}</td></tr>`;
+  }).join("");
+  const regionRows = regions.filter((r) => ["global", "hikurangi", "alpine", "kermadec"].includes(r.region)).map((r) => {
+    const beat = r.beats_climatology;
+    return `<tr><td>${r.label}</td><td>${r.this_week_analog_p == null ? "—" : chance(r.this_week_analog_p)}</td><td>${num(r.analog_brier, 3)} / ${num(r.climatology_brier, 3)}</td><td><span class="pill ${beat ? "fresh" : "open"}">${beat ? "ranks better" : "constant still wins"}</span></td></tr>`;
+  }).join("");
+  const nodes = (graph.nodes || []).map((n) => {
+    const hot = Number(n.inflow || 0) > 0;
+    return `<div class="graph-node ${hot ? "hot" : ""}"><strong>${n.label}</strong><span>local ${num(n.energy, 2)}</span><span>inflow ${num(n.inflow, 2)}</span></div>`;
+  }).join("");
+  el.innerHTML = `
+    <article class="card">
+      <h3>How unusual is this morning?</h3>
+      <p class="hint">Fit on training-era mornings with no earthquake labels. Higher means the GNSS / ocean / space-weather mix is unlike a typical day.</p>
+      <div class="grid stats dense">
+        <div class="stat"><div class="k">Issue morning</div><div class="v">${pack.issue_day}</div></div>
+        <div class="stat"><div class="k">Earth-state score</div><div class="v">${num(anom.earth_state_z, 2)}</div></div>
+        <div class="stat"><div class="k">Unusual flag</div><div class="v">${anom.earth_state_unusual ? "on" : "off"}</div></div>
+        <div class="stat"><div class="k">Sensors used</div><div class="v">${pack.n_state_columns ?? "—"}</div></div>
+      </div>
+    </article>
+    <article class="card">
+      <h3>Historical analogs</h3>
+      <p class="hint">Nearest training mornings in the same sensor space. We only keep a neighbor after its next 30 days have closed, then look at what followed.</p>
+      <div class="table-wrap"><table><thead><tr><th>Morning</th><th>Distance</th><th>What followed</th></tr></thead><tbody>${analogRows || emptyRow(3, "No analog library yet.")}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Place</th><th>Analog chance</th><th>Error vs historical rate</th><th>Holdout</th></tr></thead><tbody>${regionRows || emptyRow(4, "Not scored yet.")}</tbody></table></div>
+    </article>
+    <article class="card">
+      <h3>Fault network</h3>
+      <p class="hint">Neighboring segments pass seismic energy along strike, along the trench, and across the Marlborough transfer. Transfer on: ${graph.transfer_on ? "yes" : "no"}.</p>
+      <div class="graph-nodes">${nodes || "<p class='empty'>No segment energy yet.</p>"}</div>
+    </article>
+  `;
 }
 
 function renderWatch(items) {
   const el = $("watch-strip");
   if (!el) return;
-  if (!items.length) {
-    el.innerHTML = "";
+  const on = (items || []).filter((item) => item.on);
+  if (!on.length) {
+    el.innerHTML = `<p class="where">Signals on this morning</p><p class="hint">None of the watch-list flags are on.</p>`;
     return;
   }
-  el.innerHTML = `<p class="where">Leftover flags this morning</p><div class="flags">${items.map((item) =>
-    `<span class="flag ${item.on ? "on" : ""}">${item.label}${item.on ? " on" : ""}</span>`
+  el.innerHTML = `<p class="where">On this morning · ${on.length} of ${(items || []).length}</p><div class="flags">${on.map((item) =>
+    `<span class="flag on">${item.label}</span>`
   ).join("")}</div>`;
+}
+
+function typicalCompare(view) {
+  const held = Boolean(view?.held);
+  const typical = view?.climate || "—";
+  return `<div class="compare">
+    <div><div class="k">Typical year</div><div class="v ${held ? "lose" : "beat"}">${typical}</div></div>
+    <div><div class="k">Outcome</div><div class="v">${held ? "sensors did not beat this" : "sensors moved the number"}</div></div>
+  </div>`;
 }
 
 function callCardHtml(card, { boxId, title, place, extra } = {}) {
   if (!card) return "";
   const anti = String(card.model_id || "").startsWith("anti.");
   const { cls, outcome } = outcomeBits(card);
-  const view = leftoverView(card);
+  const view = freshView(card);
   const why = (view.why || []).join(", ");
   return `<article class="call-card${boxId === "global" ? " global" : ""}" data-box="${boxId || ""}" data-day="${(card.issued_at || "").slice(0, 10)}">
     <p class="where">${title || card.label || "Call"}</p>
     <h3>${place || card.place_plain || ""}</h3>
-            <div class="chance">${anti ? (card.chance_plain || chance(card.value)) : heroChance(card)}<small>${anti ? "chance it stays quiet" : chanceKind({ held_to_climatology: view.held })}</small></div>
+            <div class="chance">${anti ? (card.chance_plain || chance(card.value)) : heroChance(card)}<small>${anti ? "chance it stays quiet" : chanceKind(view)}</small></div>
     <p class="sentence">${anti ? (card.sentence || "") : (view.sentence || card.sentence || "")}</p>
-    <p class="etas">${card.mainshock
-      ? `Constant guess from old years: ${view.climate || "—"} · aftershock model (too late): ${card.etas_chance_plain || chance(card.competitor_etas_p)}`
-      : `Aftershock skeptic: ${card.etas_chance_plain || chance(card.competitor_etas_p)}${card.chance_plain && card.leftover_chance_plain && card.chance_plain !== card.leftover_chance_plain ? ` · catalog-only: ${card.chance_plain}` : ""}`
-    } · <span class="pill ${cls}">${outcome}</span></p>
+    ${!anti && view.traffic ? `<p class="etas">${view.traffic}</p>` : ""}
+    ${!anti && view.wait ? `<p class="etas">${view.wait}</p>` : ""}
+    ${!anti && view.neighborhood ? `<p class="etas">${view.neighborhood}</p>` : ""}
+    ${anti ? "" : typicalCompare(view)}
+    <p class="etas"><span class="pill ${cls}">${outcome}</span></p>
     ${why && !anti ? `<p class="why">Uses ${why}.</p>` : ""}
     ${extra || ""}
   </article>`;
+}
+
+function mainshockFocusHtml(data) {
+  const snap = state.snap?.mainshock || {};
+  const score = data.frozen_score || snap.frozen_score || {};
+  const short = data.short_horizons || snap.short_horizons || [];
+  const three = short.filter((row) => Number(row.horizon_days) === 3);
+  const cards = three.map((w) => `<article class="call-card${w.region === "global" ? " global" : ""}">
+      <p class="where">Next 3 days · frozen · ${w.label} M≥${w.magnitude_min}</p>
+      <div class="chance">${w.chance_plain || "—"}<small>scored card · votes stay locked</small></div>
+      <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
+      ${w.agreement_plain ? `<p class="etas">${w.agreement_plain}</p>` : ""}
+      ${voteBits(w)}
+    </article>`).join("");
+  const exam = data.agreement_exam || snap.agreement_exam;
+  const threeBlock = cards
+    ? `<article class="card head-card fresh-week"><h3>Next 3 days · frozen</h3><p class="hint">These votes are frozen so new mornings can be scored. They do not change the 30-day card.</p>${exam?.plain ? `<p class="hint">${exam.plain}</p>` : ""}<div class="grid heads fresh-attempt-grid">${cards}</div></article>`
+    : "";
+  const draft = data.draft || snap.draft;
+  const voteDraft = data.vote_draft || snap.vote_draft;
+  const thirty = (draft?.week || []).map((w) => `${w.label} ${w.chance_plain || "—"} (typical ${w.climatology_chance_plain || "—"})`).join(" · ");
+  const threeDraft = (voteDraft?.week || []).map((w) => `${w.label} ${w.chance_plain || "—"} (typical ${w.climatology_chance_plain || "—"})`).join(" · ");
+  const working = (thirty || threeDraft) ? `<article class="call-card">
+      <p class="where">Working model · not the scored card</p>
+      <div class="chance">Draft<small>can still change</small></div>
+      <p class="sentence">This is the model we can keep changing. It does not replace the frozen 30-day or 3-day cards.</p>
+      ${thirty ? `<p class="etas">30 days: ${thirty}</p><p class="etas">${draft?.promote?.reason || draft?.note || ""}</p>` : ""}
+      ${threeDraft ? `<p class="etas">3 days: ${threeDraft}</p><p class="etas">${voteDraft?.note || ""}</p>` : ""}
+    </article>` : "";
+  const scoreLine = [score["30"]?.plain, score["3"]?.plain].filter(Boolean).join(" ");
+  const odd = oddBoxHtml(data.odd_box || snap.odd_box);
+  const story = storyHtml(data.story || snap.story);
+  return `${odd}${story}${scoreLine ? `<p class="hint">${scoreLine}</p>` : ""}${threeBlock}${working}`;
+}
+
+function storyHtml(story) {
+  if (!story?.plain) return "";
+  return `<article class="card head-card"><h3>Three stories</h3><p>${story.plain}</p></article>`;
+}
+
+function sidecarWeekHtml(data) {
+  const snap = state.snap?.mainshock || {};
+  const experiments = data.experiments || snap.experiments || [];
+  const m8 = experiments.find((e) => e.id === "fresh_30d_m8");
+  const quiet = experiments.find((e) => e.id === "fresh_30d_quiet");
+  const shrunk = data.shrunk || snap.shrunk;
+  const lockedThin = data.locked_thin || snap.locked_thin;
+  const alpine = data.alpine_sequence || snap.alpine_sequence;
+  const methodEval = data.method_eval || snap.method_eval;
+  const kermAttr = data.kermadec_attribution || snap.kermadec_attribution;
+  const cards = [];
+  const short = data.short_horizons || snap.short_horizons || [];
+  if (freshMode() !== "lastweek") {
+    for (const w of short.filter((row) => Number(row.horizon_days) === 7)) {
+      cards.push(`<article class="call-card">
+      <p class="where">Next 7 days · ${w.label} M≥${w.magnitude_min}</p>
+      <div class="chance">${w.chance_plain || "—"}<small>beside the 30-day card</small></div>
+      <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
+      <p class="etas">${w.beats_climatology ? "Beat the five-year rate on later mornings." : "Has not beaten the five-year rate on later mornings."}</p>
+    </article>`);
+    }
+  }
+  const m8w = (m8?.week || [])[0] || (m8?.regions || [])[0]?.this_week;
+  if (m8w) {
+    const beat = m8?.regions?.[0]?.beats_climatology;
+    cards.push(`<article class="call-card">
+      <p class="where">Earth-wide M8 · research only</p>
+      <div class="chance">${m8w.fresh_raw_chance_plain || m8w.chance_plain || chance(m8w.p)}<small>${beat ? "beats a typical year on later mornings" : "has not beaten a typical year yet"}</small></div>
+      <p class="sentence">${m8w.sentence || "A scored Earth-wide M8 call. It does not replace the published M7 number."}</p>
+      <p class="etas">Typical year: ${m8w.climatology_chance_plain || "—"} · not the published number</p>
+    </article>`);
+  }
+  for (const r of (quiet?.regions || []).filter((row) => row.beats_climatology)) {
+    const tw = r.this_week || {};
+    cards.push(`<article class="call-card">
+      <p class="where">Quiet-start · ${r.label} M≥${r.magnitude_min} · research only</p>
+      <div class="chance">${tw.fresh_raw_chance_plain || tw.chance_plain || chance(tw.p)}<small>quiet mornings beat a typical year on later years</small></div>
+      <p class="sentence">${tw.sentence || ""}</p>
+      <p class="etas">Typical year: ${tw.climatology_chance_plain || "—"} · not the published number</p>
+    </article>`);
+  }
+  if (shrunk?.week?.length) {
+    const n = shrunk.n_beats_climatology || 0;
+    const bits = (shrunk.week || []).map((w) => `${w.label} ${w.fresh_raw_chance_plain || w.chance_plain || "—"}`).join(" · ");
+    cards.push(`<article class="call-card">
+      <p class="where">Shrunk model · research only</p>
+      <div class="chance">${n} / ${(shrunk.week || []).length}<small>boxes beating a typical year · at most ${shrunk.cap || 32} columns</small></div>
+      <p class="sentence">${shrunk.note || "A smaller sibling of the published model. It does not write the official number."}</p>
+      <p class="etas">${bits}</p>
+    </article>`);
+  }
+  if (lockedThin?.week?.length) {
+    const n = lockedThin.n_beats_climatology || 0;
+    const bits = (lockedThin.week || []).map((w) => `${w.label} ${w.fresh_raw_chance_plain || w.chance_plain || "—"}`).join(" · ");
+    cards.push(`<article class="call-card">
+      <p class="where">Locked thin model · research only</p>
+      <div class="chance">${n} / ${(lockedThin.week || []).length}<small>boxes beating a typical year · ${lockedThin.n_features || 0} locked knobs</small></div>
+      <p class="sentence">${lockedThin.note || "Frozen short source list. It does not write the official number."}</p>
+      <p class="etas">${bits}</p>
+    </article>`);
+  }
+  const alw = (alpine?.week || [])[0];
+  if (alw) {
+    cards.push(`<article class="call-card">
+      <p class="where">Alpine sequence · ${alpine.applied ? "mixed into the published chance" : "research only"}</p>
+      <div class="chance">${alw.fresh_raw_chance_plain || alw.chance_plain || chance(alw.p)}<small>${alpine.applied ? "mixed into the Alpine published chance" : "stays off the published chance"}</small></div>
+      <p class="sentence">${alpine.note || alw.sentence || ""}</p>
+      <p class="etas">Typical year: ${alw.climatology_chance_plain || "—"}</p>
+    </article>`);
+  }
+  if (methodEval?.week?.length || methodEval?.regions?.length) {
+    const n = methodEval.n_beats_climatology || 0;
+    const bits = (methodEval.week || []).map((w) => `${w.label} ${w.fresh_raw_chance_plain || w.chance_plain || "—"}`).join(" · ");
+    cards.push(`<article class="call-card">
+      <p class="where">Japan / Chile method check · research only</p>
+      <div class="chance">${n} / ${(methodEval.week || methodEval.regions || []).length}<small>practice boxes beating a typical year · not live cards</small></div>
+      <p class="sentence">${methodEval.note || "These boxes test the method on daily windows. They never get a live card."}</p>
+      <p class="etas">${bits || "—"}</p>
+    </article>`);
+  }
+  if (kermAttr) {
+    const verdict = kermAttr.verdict || "none";
+    const label = { season: "season", sse: "slow slip", precursor: "leftover", none: "rolling rate only" }[verdict] || verdict;
+    cards.push(`<article class="call-card">
+      <p class="where">Kermadec look · research only</p>
+      <div class="chance">${label}<small>season vs slow-slip vs leftover · not the published number</small></div>
+      <p class="sentence">${kermAttr.note || ""}</p>
+      <p class="etas">Season ${kermAttr.season?.beats ? "beats rate" : "no"} · SSE ${kermAttr.season_sse?.beats ? "adds skill" : "no"} · leftover ${kermAttr.leftover?.beats ? "yes" : "no"}</p>
+    </article>`);
+  }
+  const leftover = data.leftover || snap.leftover;
+  if (leftover?.week?.length) {
+    const n = leftover.n_beats_schedule || 0;
+    const veto = leftover.circus_veto;
+    const bits = (leftover.week || []).map((w) => `${w.label} ${w.leftover_chance_plain || w.chance_plain || "—"}`).join(" · ");
+    cards.push(`<article class="call-card">
+      <p class="where">Leftover extra · research only</p>
+      <div class="chance">${n} / ${(leftover.week || []).length}<small>${veto ? "circus vetoed leftover this week" : "boxes beating the schedule foil"} · not the published number</small></div>
+      <p class="sentence">${leftover.note || "Climate and the schedule foil first, then every other source. This does not write the official number."}</p>
+      <p class="etas">${bits}</p>
+    </article>`);
+  }
+  const look = data.leftover_look || snap.leftover_look;
+  if (look && (look.sentence || look.which_box || look.n_analogs)) {
+    const rate = look.which_box_rate != null ? Math.round(100 * Number(look.which_box_rate)) : "—";
+    cards.push(`<article class="call-card">
+      <p class="where">Which-box-next · leftover analogs</p>
+      <div class="chance">${look.which_box_label || "none"}<small>${look.n_analogs || 0} closed mornings · ${rate} / 100 of analogs · not the published number</small></div>
+      <p class="sentence">${look.sentence || look.note || "The last 40 closed mornings that looked like this leftover."}</p>
+    </article>`);
+  }
+  const circus = data.circus || snap.circus;
+  if (circus && (circus.foils || circus.note)) {
+    const ok = circus.pass !== false;
+    cards.push(`<article class="call-card">
+      <p class="where">Circus extra · research only</p>
+      <div class="chance">${ok ? "pass" : "veto"}<small>${ok ? "leftover did not track a foil" : `${circus.n_fail || 0} foil test(s) failed`} · weekday / payday / HAARP / wiki</small></div>
+      <p class="sentence">${circus.note || "Negative-control circus. It never writes the published number."}</p>
+      <p class="etas">${(circus.foils || []).join(" · ") || "—"}</p>
+    </article>`);
+  }
+  if (!cards.length && freshMode() === "lastweek") return "";
+  const research = cards.length
+    ? `<details class="fold"><summary>Other research cards</summary><div class="grid heads fresh-attempt-grid sidecar-grid">${cards.join("")}</div></details>`
+    : "";
+  if (freshMode() === "lastweek") return research;
+  return `${mainshockFocusHtml(data)}${research}`;
 }
 
 function renderWeek(data) {
@@ -768,8 +1107,8 @@ function renderWeek(data) {
   const boxesEl = $("week-boxes");
   const emptyEl = $("week-empty");
   if (!globalEl || !boxesEl) return;
-  if (leftoverMode() === "lastweek" && !(data.last_week?.week || []).length) {
-    globalEl.innerHTML = `<article class="call-card global"><p class="where">Last-week leftover</p><p class="sentence">This mode only looks at the last 7 days of leftover sources and calls next week. It has not been scored yet. Run <code>eqpred mainshock --last-week</code>. Official ledger cards stay calibrated ETAS.</p></article>`;
+  if (freshMode() === "lastweek" && !(data.last_week?.week || []).length) {
+    globalEl.innerHTML = `<article class="call-card global"><p class="where">Last 7 days of sensors</p><p class="sentence">This mode only looks at the last 7 days of sensors and calls the next 30 days. It has not been scored yet.</p></article>`;
     boxesEl.innerHTML = "";
     if (emptyEl) emptyEl.hidden = true;
     return;
@@ -799,10 +1138,12 @@ function renderWeek(data) {
     });
   }).join("");
   boxesEl.innerHTML = cards;
+  const sideEl = $("week-sidecars");
+  if (sideEl) sideEl.innerHTML = sidecarWeekHtml(data);
   if (emptyEl) emptyEl.hidden = Boolean(g || cards);
   const hud = $("globe-hud");
   if (hud && g) {
-    hud.innerHTML = `<article class="call-card global"><p class="where">Earth-wide fresh big quake</p><div class="chance">${heroChance(g)}<small>magnitude 7+ this week</small></div></article>`;
+    hud.innerHTML = `<article class="call-card global"><p class="where">Earth-wide</p><div class="chance">${heroChance(g)}<small>magnitude 7+ in the next 30 days</small></div></article>`;
   }
   document.querySelectorAll(".call-card").forEach((card) => {
     card.addEventListener("click", () => {
@@ -874,9 +1215,9 @@ function drawGlobe(data) {
           return chip;
         })
         (el);
-      state.globe.controls().autoRotate = state.globeSpin;
+      state.globe.controls().autoRotate = false;
       state.globe.controls().autoRotateSpeed = 0.38;
-      lookAtNZ();
+      lookAtNZ(0);
     } catch (err) {
       $("globe-meta").textContent = `The 3D globe failed (${err.message}). This week’s chances are still listed beside it.`;
       return;
@@ -892,16 +1233,16 @@ function drawGlobe(data) {
 function renderOverview(snap) {
   if (state.globeData?.copy?.lede) applyCopy(state.globeData.copy);
   else $("lede").textContent = snap.what_plain || snap.what;
-  const leftover = snap.brain?.locked_brier;
+  const brainErr = snap.brain?.locked_brier;
   const etasErr = snap.brain?.locked_etas_brier;
-  const leftoverVs = leftover == null || etasErr == null
+  const freshVs = brainErr == null || etasErr == null
     ? "—"
-    : `${num(leftover, 3)} / ${num(etasErr, 3)}`;
+    : `${num(brainErr, 3)} / ${num(etasErr, 3)}`;
   const hero = [
-    ["Finished weeks", String(snap.n_scored ?? snap.n_cards ?? "—")],
+    ["Finished windows", String(snap.n_scored ?? snap.n_cards ?? "—")],
     ["Still waiting", String(snap.n_open_windows ?? "0")],
-    ["Leftover / aftershock error", leftoverVs],
-    ["Published chance", snap.promote?.pass ? "gate passed, still unchanged" : "unchanged"],
+    ["Model / aftershock error", freshVs],
+    ["Published chance", snap.promote?.pass ? "beat a typical year, still official" : "unchanged"],
     ["This morning", snap.watchdog?.ok ? "feeds are fresh" : "too stale to publish"],
     ["Model version", snap.registry?.id ? String(snap.registry.id).slice(0, 17) : "unpinned"],
   ];
@@ -915,9 +1256,12 @@ function renderOverview(snap) {
     ["M ≥ 8 in catalog", String(snap.catalog.n_m8 ?? "—")],
     ["Feature days", String(snap.features.n_days ?? "—")],
     ["Published cards", String(snap.n_cards ?? "—")],
+    ["Live vs backcast cards", `${snap.n_prospective ?? 0} written on time · ${snap.n_retrospective ?? 0} backfilled`],
+    ["Eval protocol", snap.mainshock?.evaluation?.protocol || "—"],
     ["Hunt", snap.hunt?.n_tests ? `${snap.hunt.n_tests} tests · ${snap.hunt.n_confirmed_unconventional ?? 0} held` : "not run"],
-    ["Fresh leftover hunt", snap.hunt_fresh?.n_confirmed != null ? `${snap.hunt_fresh.n_tests} tests · ${snap.hunt_fresh.n_confirmed} held` : "not run"],
-    ["Where / M8 probe", snap.probe?.where_issued?.leftover_acc != null ? `${pct(snap.probe.where_issued.leftover_acc)} named the NZ box` : (snap.probe?.note ? "run" : "not run")],
+    ["Fresh-shock hunt", snap.hunt_fresh?.n_confirmed != null ? `${snap.hunt_fresh.n_tests} tests · ${snap.hunt_fresh.n_confirmed} held${snap.hunt_fresh.honest ? ` · climate ${snap.hunt_fresh.honest.n_beats_climate || 0} beat rate` : ""}` : "not run"],
+    ["Sequence hunt", snap.hunt_sequence?.n_confirmed != null ? `${snap.hunt_sequence.n_tests} tests · ${snap.hunt_sequence.n_confirmed} held` : "not run"],
+    ["Where / M8 probe", freshAcc(snap.probe?.where_issued) != null ? `${pct(freshAcc(snap.probe.where_issued))} named the NZ box` : (snap.probe?.note ? "run" : "not run")],
     ["Replay", snap.backtest?.n_trades ? `${snap.backtest.n_trades} paper trades` : "replay finished weeks"],
     ["Learner", snap.brain?.n_features ? `${snap.brain.n_features} series · lift ${snap.brain.locked_lift == null ? "—" : `${(snap.brain.locked_lift * 100).toFixed(1)} pt`}` : "not run"],
     ["Practice transfer", snap.transfer?.n_pairs != null ? `${snap.transfer.n_beats_etas || 0}/${snap.transfer.n_pairs} beat the model` : "not run"],
@@ -933,7 +1277,7 @@ function renderOverview(snap) {
     ["Catalog nowcast", snap.models?.nowcast?.used_on_issued ? "on published chance" : "tested, left off"],
     ["Tidal stress", coulombStat(snap.models?.coulomb)],
     ["Storm cusp", coulombStat(snap.models?.cusp)],
-    ["Wave 2 leftover", wave2Stat(snap.models?.wave2)],
+    ["Wave 2 sources", wave2Stat(snap.models?.wave2)],
     ["Box migration", migrationStat(snap.models?.migration)],
   ];
   const storeGrid = $("store-grid");
@@ -951,10 +1295,13 @@ function renderOverview(snap) {
   renderWatchdog(snap.watchdog);
   renderRegistry(snap.registry);
   renderHunt(snap.hunt_fresh || snap.hunt);
+  renderHunt(snap.hunt_sequence, "hunt-seq");
   renderBacktestPack(snap.backtest);
   window.__promote = snap.promote;
   window.__transfer = snap.transfer;
   renderBrain(snap.brain);
+  renderAftershock(snap.aftershock);
+  renderCsep(snap.csep || snap.mainshock?.csep);
 
   const end = snap.features.end || snap.catalog.end;
   if (end) {
@@ -1017,56 +1364,113 @@ function renderOverview(snap) {
   });
 }
 
+function sequenceLine(seq) {
+  if (!seq) return "";
+  if (!seq.active) return `<p class="etas">No active sequence</p>`;
+  const bits = [`n=${seq.n ?? "—"}`, `shape ${seq.shape || "—"}`];
+  if (seq.b_pos_delta != null && Number.isFinite(Number(seq.b_pos_delta))) {
+    const delta = Number(seq.b_pos_delta);
+    bits.push(`Δb+ ${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`);
+  }
+  const light = seq.traffic_light && seq.traffic_light !== "none"
+    ? ` <span class="pill tl-${seq.traffic_light}">${seq.traffic_light}</span>`
+    : "";
+  return `<p class="etas">Active sequence: ${bits.join(" · ")}${light}</p>`;
+}
+
 function foreshockAttemptCardsHtml(pack) {
   const week = (pack?.week || []).filter((w) =>
     ["global", "hikurangi", "alpine", "kermadec"].includes(w.region)
   );
   if (!week.length) {
-    return `<article class="card head-card leftover-week"><h3>This week’s catalog precursor</h3><p class="hint">Run <code>eqpred foreshock</code> to score small-quake counts known that morning against a fresh mainshock. Official ledger cards stay calibrated ETAS. This is not leftover.</p></article>`;
+    return `<article class="card head-card fresh-week"><h3>This week’s catalog check</h3><p class="hint">Run the foreshock bench to score small-quake counts and sequence shape known that morning. This is a catalog check, not the published forecast.</p></article>`;
   }
   const cards = week.map((w) => {
     const raw = w.foreshock_raw_chance_plain || chance(w.foreshock_raw_p);
     const kind = w.held_to_climatology
-      ? "catalog precursor attempt (does not beat the historical rate)"
-      : "catalog precursor call this week";
+      ? "catalog check · still matching a typical year"
+      : "catalog check this week";
     const why = (w.why || []).slice(0, 6).join(", ");
+    const etas = w.etas_chance_plain ? `<p class="etas">Aftershock model: ${w.etas_chance_plain}</p>` : "";
     return `<article class="call-card${w.region === "global" ? " global" : ""}">
       <p class="where">Catalog precursor · ${w.label} M≥${w.magnitude_min}</p>
       <div class="chance">${raw || "—"}<small>${kind}</small></div>
       <p class="sentence">${w.sentence || ""}</p>
-      <p class="etas">Historical rate: ${w.climatology_chance_plain || "—"}</p>
+      <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
+      ${etas}
+      ${sequenceLine(w.sequence)}
       ${why ? `<p class="why">Uses ${why}.</p>` : ""}
     </article>`;
   }).join("");
-  return `<article class="card head-card leftover-week"><h3>This week’s catalog precursor</h3><p class="hint">Small and moderate quakes known that morning, in a box that has not just had a large shock. Shown even when it loses. Official ledger cards stay calibrated ETAS. Not leftover. Not a public warning.</p><div class="grid heads leftover-attempt-grid">${cards}</div></article>`;
+  return `<article class="card head-card fresh-week"><h3>This week’s catalog check</h3><p class="hint">Small and moderate quakes known that morning, and the shape of any active sequence. Shown even when it loses. This is not the published forecast.</p><div class="grid heads fresh-attempt-grid">${cards}</div></article>`;
 }
 
-function leftoverAttemptCardsHtml(pack) {
-  const last = leftoverMode() === "lastweek";
+function freshAttemptCardsHtml(pack) {
+  const last = freshMode() === "lastweek";
   const source = last ? (pack?.last_week || {}) : pack;
   const week = (source.week || []).filter((w) =>
     ["global", "hikurangi", "alpine", "kermadec"].includes(w.region)
   );
   if (!week.length) {
     return last
-      ? `<article class="card head-card leftover-week"><h3>This week’s last-week leftover predictions</h3><p class="hint">This mode only looks at the last 7 days of leftover sources and calls next week. Run <code>eqpred mainshock --last-week</code> to score it. Official ledger cards stay calibrated ETAS.</p></article>`
+      ? `<article class="card head-card fresh-week"><h3>This week’s last-7-day forecasts</h3><p class="hint">This mode only looks at the last 7 days of sensors and calls the next 30 days. It has not been scored yet.</p></article>`
       : "";
   }
   const cards = week.map((w) => {
-    const raw = w.leftover_raw_chance_plain || chance(w.leftover_raw_p);
-    const kind = w.held_to_climatology
-      ? (last ? "last-week leftover attempt (does not beat the historical rate)" : "leftover attempt this week (does not beat the historical rate)")
-      : (last ? "last-week leftover call" : "leftover call this week");
+    const raw = w.fresh_raw_chance_plain || w.leftover_raw_chance_plain || chance(w.fresh_raw_p ?? w.leftover_raw_p);
+    const issued = raw || w.chance_plain || chance(w.p);
+    const kind = chanceKind({ ...w, held_to_climatology: w.held_to_climatology });
     const why = (w.why || []).slice(0, 6).join(", ");
     return `<article class="call-card${w.region === "global" ? " global" : ""}">
-      <p class="where">${last ? "Last-week leftover" : "Leftover attempt"} · ${w.label} M≥${w.magnitude_min}</p>
-      <div class="chance">${raw || "—"}<small>${kind}</small></div>
+      <p class="where">${last ? "Last 7 days of sensors" : "Published chance"} · ${w.label} M≥${w.magnitude_min}</p>
+      <div class="chance">${issued || "—"}<small>${kind}</small></div>
       <p class="sentence">${w.sentence || ""}</p>
-      <p class="etas">Historical rate: ${w.climatology_chance_plain || "—"}</p>
+      <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
+      ${w.wait_plain ? `<p class="etas">${w.wait_plain}</p>` : ""}
+      ${w.neighborhood_plain ? `<p class="etas">${w.neighborhood_plain}</p>` : ""}
+      ${w.traffic_sentence ? `<p class="etas">${w.traffic_sentence}</p>` : ""}
+      ${w.issued_from === "shared"
+        ? `<p class="etas">Shared encoder over every live family${w.independent_chance_plain ? ` · this box alone ${w.independent_chance_plain}` : ""}</p>`
+        : w.issued_from === "pooled"
+        ? `<p class="etas">Taken from the four-box pooled model${w.independent_chance_plain ? ` · this box alone ${w.independent_chance_plain}` : ""}</p>`
+        : (w.pooled_chance_plain ? `<p class="etas">This box’s own specialist · pooled would be ${w.pooled_chance_plain}</p>` : "")}
       ${why ? `<p class="why">Uses ${why}.</p>` : ""}
     </article>`;
   }).join("");
-  return `<article class="card head-card leftover-week"><h3>${last ? "This week’s last-week leftover predictions" : "This week’s leftover predictions"}</h3><p class="hint">${last ? "Only the past 7 days of leftover sources, calling next week. " : ""}Shown even when leftover loses. Official ledger cards stay calibrated ETAS. Not a public warning.</p><div class="grid heads leftover-attempt-grid">${cards}</div></article>`;
+  return `<article class="card head-card fresh-week"><h3>${last ? "This week’s last-7-day forecasts" : "This week’s published forecasts"}</h3><p class="hint">${last ? "Only the past 7 days of sensors, calling the next 30 days. " : "Next 30 days. "}The typical year sits beside each number. Not a public warning.</p><div class="grid heads fresh-attempt-grid">${cards}</div></article>`;
+}
+
+function oddBoxHtml(odd) {
+  if (!odd?.plain) return "";
+  return `<article class="card head-card"><h3>Odd one out</h3><p>${odd.plain}</p></article>`;
+}
+
+function voteBits(w) {
+  if (w.issued_from !== "votes") return "";
+  const up = (w.votes_up || []).map((v) => `${v.family} ${v.points_plain}`).join(", ");
+  const down = (w.votes_down || []).map((v) => `${v.family} ${v.points_plain}`).join(", ");
+  const swarm = w.swarm
+    ? `<p class="etas">${w.swarm_plain}</p>`
+    : "";
+  return `<p class="etas">${w.lineup_plain || ""}</p>${up ? `<p class="why">Up: ${up}.</p>` : ""}${down ? `<p class="why">Down: ${down}.</p>` : ""}${swarm}<p class="etas">Weights are frozen for scoring. The working model can still change and does not replace this card.</p>`;
+}
+
+function shortHorizonCardsHtml(pack) {
+  const rows = pack?.short_horizons || [];
+  if (!rows.length || freshMode() === "lastweek") return "";
+  const blocks = [7, 3].map((horizon) => {
+    const week = rows.filter((w) => Number(w.horizon_days) === horizon);
+    if (!week.length) return "";
+    const cards = week.map((w) => `<article class="call-card${w.region === "global" ? " global" : ""}">
+      <p class="where">Next ${horizon} days · ${w.label} M≥${w.magnitude_min}</p>
+      <div class="chance">${w.chance_plain || "—"}<small>${horizon === 3 && w.issued_from === "votes" ? "votes added up" : "beside the 30-day card"}</small></div>
+      <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
+      ${horizon === 3 && w.agreement_plain ? `<p class="etas">${w.agreement_plain}</p>` : ""}
+      ${horizon === 3 && w.issued_from === "votes" ? voteBits(w) : `<p class="etas">${w.beats_climatology ? "Beat the five-year rate on later mornings." : "Has not beaten the five-year rate on later mornings."}</p>`}
+    </article>`).join("");
+    return `<article class="card head-card fresh-week"><h3>Next ${horizon} days${horizon === 3 ? " · frozen" : ""}</h3><p class="hint">${horizon === 3 ? "Frozen votes. New mornings are scored with these weights. This does not change the 30-day card." : "Same recipe as the published card, asking about a shorter window. This does not replace the 30-day chance."}</p><div class="grid heads fresh-attempt-grid">${cards}</div></article>`;
+  }).join("");
+  return blocks;
 }
 
 function renderMainshock(snap) {
@@ -1075,46 +1479,54 @@ function renderMainshock(snap) {
   const grid = $("mainshock-heads");
   if (!grid) return;
   if (note) {
-    note.textContent = leftoverMode() === "lastweek"
+    note.textContent = freshMode() === "lastweek"
       ? (pack?.last_week?.note || pack?.note || "")
       : (pack?.note || "");
   }
   if (!pack?.regions?.length) {
-    grid.innerHTML = `<p class="empty">Run <code>eqpred mainshock</code> to backtest the leftover model on fresh big quakes.</p>`;
+    grid.innerHTML = `<p class="empty">Run <code>eqpred mainshock</code> to backtest the fresh-shock model on first large quakes.</p>`;
     return;
   }
-  const leftoverWeek = leftoverAttemptCardsHtml(pack);
-  const regions = leftoverMode() === "lastweek" && pack.last_week?.regions?.length
+  const score = pack.frozen_score || {};
+  const scoreLine = freshMode() === "lastweek" ? "" : [score["30"]?.plain, score["3"]?.plain].filter(Boolean).join(" ");
+  const freshWeek = (scoreLine ? `<p class="hint">${scoreLine}</p>` : "") + storyHtml(pack.story) + oddBoxHtml(pack.odd_box) + freshAttemptCardsHtml(pack) + shortHorizonCardsHtml(pack);
+  const regions = freshMode() === "lastweek" && pack.last_week?.regions?.length
     ? pack.last_week.regions
     : pack.regions;
-  grid.innerHTML = leftoverWeek + regions.map((r) => {
+  grid.innerHTML = freshWeek + regions.map((r) => {
     const beat = r.beats_climatology === true;
     const leaked = r.recipe_leaked;
-    const verdict = beat ? " · leftover ranks and errors better" : leaked ? " · hunt leakage, does not count" : " · leftover does not win yet";
+    const verdict = beat ? " · model ranks and errors better" : leaked ? " · hunt leakage, does not count" : " · has not beaten a typical year yet";
     const why = (r.why || []).slice(0, 4).join(", ");
     const tw = r.this_week || {};
-    const attempt = tw.leftover_raw_chance_plain || chance(tw.leftover_raw_p);
+    const attempt = tw.fresh_raw_chance_plain || tw.leftover_raw_chance_plain || chance(tw.fresh_raw_p ?? tw.leftover_raw_p);
     const attemptLine = attempt
-      ? `<div class="k">this week's leftover attempt</div><div class="v">${attempt}${tw.held_to_climatology ? " · does not beat the historical rate" : ""}${tw.climatology_chance_plain ? ` · historical rate ${tw.climatology_chance_plain}` : ""}</div>`
+      ? `<div class="k">this week's published chance</div><div class="v">${attempt}${chanceKind(tw) ? ` · ${chanceKind(tw)}` : ""}${tw.climatology_chance_plain ? ` · typical year ${tw.climatology_chance_plain}` : ""}</div>`
       : "";
     return `<article class="card head-card">
       <h3>${r.label} · M≥${r.magnitude_min}</h3>
-      <p class="hint">${r.n_score} later weeks · fresh hit rate ${pct(r.fresh_rate_holdout)} (aftershocks included: ${pct(r.raw_rate_holdout)})</p>
+      <p class="hint">${r.n_score} later mornings · first-shock hit rate ${pct(r.fresh_rate_holdout)} (aftershocks included: ${pct(r.raw_rate_holdout)})</p>
       ${attemptLine}
-      <div class="k">error vs a constant guess</div><div class="v">${num(r.brier, 3)} / ${num(r.climatology_brier, 3)}${verdict}</div>
-      <div class="k">recipe</div><div class="v">${r.recipe || "—"}</div>
-      <div class="k">when leftover was loudest</div><div class="v">${pct(r.hit_rate)} happened · ${pct(r.time_in_alarm)} of days · lift ${r.lift == null ? "—" : `${(r.lift * 100).toFixed(1)} pt`}</div>
+      <div class="k">error vs a typical year</div><div class="v">${num(r.brier, 3)} / ${num(r.climatology_brier, 3)}${r.brier_p_holm != null ? ` · Holm p=${num(r.brier_p_holm, 3)}` : (r.brier_p_value != null ? ` · bootstrap p=${num(r.brier_p_value, 3)}` : "")}${r.brier_week != null ? ` · week ${num(r.brier_week, 3)} / ${num(r.climatology_brier_week, 3)}` : ""}${verdict}</div>
+      <div class="k">recipe</div><div class="v">${r.recipe || "—"}${r.issued_from === "shared" ? " · issued from the shared stack" : r.issued_from === "pooled" ? " · issued from the pooled model" : r.issued_from === "shrunk" ? " · issued from the shrunk sibling" : tw.pooled_chance_plain ? ` · pooled ${tw.pooled_chance_plain}` : ""}</div>
+      <div class="k">when the model was loudest</div><div class="v">${pct(r.hit_rate)} happened · ${pct(r.time_in_alarm)} of days · lift ${r.lift == null ? "—" : `${(r.lift * 100).toFixed(1)} pt`}</div>
       ${why ? `<p class="hint">Leaned on ${why}.</p>` : ""}
     </article>`;
   }).join("");
-  const extras = leftoverMode() === "lastweek" ? [] : (pack.experiments || []);
+  const extras = freshMode() === "lastweek" ? [] : (pack.experiments || []);
   if (extras.length) {
     grid.insertAdjacentHTML("beforeend", extras.map((exp) => {
-      const title = exp.id === "fresh_30d"
-        ? "Next 30 days — leftover vs a constant"
+      const title = exp.id === "fresh_7d"
+        ? "Next 7 days — fresh shock vs a constant"
+        : exp.id === "fresh_30d"
+        ? "Next 30 days — fresh shock vs a constant"
         : exp.id === "fresh_7d_m8"
-          ? "Earth-wide M8 next week — leftover vs a constant"
-          : "Quiet-start next week — leftover vs a constant";
+          ? "Earth-wide M8 next week — fresh shock vs a constant"
+          : exp.id === "fresh_30d_m8"
+            ? "Earth-wide M8 next 30 days — fresh shock vs a constant"
+            : exp.id === "fresh_30d_quiet"
+              ? "Quiet-start next 30 days — fresh shock vs a constant"
+              : "Quiet-start next week — fresh shock vs a constant";
       const rows = (exp.regions || []).map((r) => {
         const beat = r.beats_climatology === true;
         const held = r.this_week?.held_to_climatology;
@@ -1125,8 +1537,54 @@ function renderMainshock(snap) {
       return `<article class="card head-card"><h3>${title}</h3><p class="hint">${exp.n_beats_climatology || 0} of ${(exp.regions || []).length} beat a constant guess.</p><div class="watch-list">${rows}</div></article>`;
     }).join(""));
   }
+  if (freshMode() !== "lastweek" && pack.shrunk) {
+    const sh = pack.shrunk;
+    const rows = (sh.regions || []).map((r) => {
+      const beat = r.beats_climatology === true;
+      return `<div class="watch-row"><span class="src">${r.label} M≥${r.magnitude_min}</span><span class="pill ${beat ? "fresh" : "open"}">${beat ? "ranks better" : "constant still wins"} · ${num(r.brier, 3)} / ${num(r.climatology_brier, 3)}</span></div>`;
+    }).join("");
+    grid.insertAdjacentHTML("beforeend", `<article class="card head-card"><h3>Shrunk model — smaller sibling</h3><p class="hint">${sh.note || "Sibling of the published model. Does not write the official number."}</p><div class="watch-list">${rows}</div></article>`);
+  }
+  if (freshMode() !== "lastweek" && pack.locked_thin) {
+    const lt = pack.locked_thin;
+    const rows = (lt.regions || []).map((r) => {
+      const beat = r.beats_climatology === true;
+      return `<div class="watch-row"><span class="src">${r.label} M≥${r.magnitude_min}</span><span class="pill ${beat ? "fresh" : "open"}">${beat ? "ranks better" : "constant still wins"} · ${num(r.brier, 3)} / ${num(r.climatology_brier, 3)}</span></div>`;
+    }).join("");
+    grid.insertAdjacentHTML("beforeend", `<article class="card head-card"><h3>Locked thin model — short locked list</h3><p class="hint">${lt.note || "Frozen source list. Does not write the official number."}</p><div class="watch-list">${rows}</div></article>`);
+  }
+  if (freshMode() !== "lastweek" && pack.alpine_sequence) {
+    const al = pack.alpine_sequence;
+    const r = (al.regions || [])[0];
+    const tw = r?.this_week || {};
+    grid.insertAdjacentHTML("beforeend", `<article class="card head-card"><h3>Alpine sequence extra</h3><p class="hint">${al.note || ""}</p>${r ? `<div class="k">this week's sequence call</div><div class="v">${tw.fresh_raw_chance_plain || tw.chance_plain || "—"} · typical year ${tw.climatology_chance_plain || "—"}</div><div class="k">error vs a typical year</div><div class="v">${num(r.brier, 3)} / ${num(r.climatology_brier, 3)}</div><div class="k">on the published chance</div><div class="v">sidecar only · never mixed in</div>` : ""}</article>`);
+  }
+  if (freshMode() !== "lastweek") {
+    const foils = foilCardsHtml(snap);
+    if (foils) grid.insertAdjacentHTML("beforeend", foils);
+  }
   renderProbe(snap.probe);
   renderForeshock(snap);
+}
+
+function foilCardsHtml(snap) {
+  const bits = [];
+  const eepas = snap?.eepas;
+  if (eepas?.week?.length) {
+    const rows = eepas.week.map((w) =>
+      `<div class="watch-row"><span class="src">${w.label} M≥${w.magnitude_min}</span><span class="pill open">${w.chance_plain || "—"} · 90 days</span></div>`
+    ).join("");
+    bits.push(`<article class="card head-card" id="eepas-card"><h3>Medium-term catalog (EEPAS)</h3><p class="hint">${eepas.card_label || eepas.note || ""}</p><div class="watch-list">${rows}</div><p class="etas">Not the published 30-day number.</p></article>`);
+  }
+  const wide = snap?.widenet;
+  if (wide?.note) {
+    bits.push(`<article class="card head-card" id="widenet-card"><h3>Wide-net foil · Japan or Chile</h3><p class="hint">${wide.note}</p><p class="etas">Not the published number · time in alarm ${pct(wide.time_in_alarm)} · Polynesia confirm ${wide.polynesia_confirm_rate == null ? "—" : pct(wide.polynesia_confirm_rate)}</p></article>`);
+  }
+  const das = snap?.das_foil;
+  if (das?.note) {
+    bits.push(`<article class="card head-card" id="das-foil-card"><h3>Haast DAS clips</h3><p class="hint">${das.note}</p><p class="etas">${das.n_files ?? 0} files · not in the published chance</p></article>`);
+  }
+  return bits.join("");
 }
 
 function renderForeshock(snap) {
@@ -1149,10 +1607,16 @@ function renderForeshock(snap) {
     const attemptLine = attempt
       ? `<div class="k">this week's catalog precursor attempt</div><div class="v">${attempt}${tw.held_to_climatology ? " · does not beat the historical rate" : ""}${tw.climatology_chance_plain ? ` · historical rate ${tw.climatology_chance_plain}` : ""}</div>`
       : "";
+    const cond = r.sequence_conditional || {};
+    const condLine = cond.n_mornings
+      ? `<div class="k">active-sequence mornings vs aftershock model</div><div class="v">${cond.beats_etas ? "lower error than ETAS" : "does not beat ETAS yet"}${cond.beats_climatology ? " · beats a constant" : " · constant still wins"}</div>`
+      : "";
     return `<article class="card head-card">
       <h3>${r.label} · M≥${r.magnitude_min}</h3>
-      <p class="hint">${r.n_score} later quiet-start weeks · fresh hit rate ${pct(r.fresh_rate_holdout)} (aftershocks included: ${pct(r.raw_rate_holdout)})</p>
+      <p class="hint">${r.n_score} later quiet-start mornings · fresh hit rate ${pct(r.fresh_rate_holdout)} (aftershocks included: ${pct(r.raw_rate_holdout)})</p>
       ${attemptLine}
+      ${sequenceLine(tw.sequence || r.sequence)}
+      ${condLine}
       <div class="k">error vs a constant guess</div><div class="v">${num(r.brier, 3)} / ${num(r.climatology_brier, 3)}${verdict}</div>
       <div class="k">recipe</div><div class="v">${r.recipe || "—"}</div>
       <div class="k">when the precursor was loudest</div><div class="v">${pct(r.hit_rate)} happened · ${pct(r.time_in_alarm)} of days · lift ${r.lift == null ? "—" : `${(r.lift * 100).toFixed(1)} pt`}</div>
@@ -1168,21 +1632,21 @@ function renderProbe(pack) {
   const shifts = (m8.shifts || []).map((row) => {
     const collapsed = (row.time_in_alarm || 0) >= 0.99;
     const lift = collapsed ? "collapsed to a constant" : (row.lift == null ? "—" : `lift ${(row.lift * 100).toFixed(1)} pt`);
-    return `<div class="watch-row"><span class="src">${row.shift_days ? `leftover shifted ${row.shift_days}d` : "aligned leftover"}</span><span class="pill ${row.shift_days ? "open" : "fresh"}">${lift}${collapsed ? "" : ` · ${row.n_hits ?? 0}/${row.n_trades ?? 0} loud hits`}</span></div>`;
+    return `<div class="watch-row"><span class="src">${row.shift_days ? `model shifted ${row.shift_days}d` : "aligned model"}</span><span class="pill ${row.shift_days ? "open" : "fresh"}">${lift}${collapsed ? "" : ` · ${row.n_hits ?? 0}/${row.n_trades ?? 0} loud hits`}</span></div>`;
   }).join("");
   const leak = m8.looks_like_leakage
-    ? "Shifted leftover still ranks — treat the M8 hint as season or leakage."
-    : "A leftover shift did not keep the same ranking.";
+    ? "Shifted model still ranks — treat the M8 hint as season or leakage."
+    : "A shifted copy did not keep the same ranking.";
   const whereCard = (w, title) => {
     if (!w) return "";
-    if (w.leftover_acc == null) {
+    if ((freshAcc(w) == null)) {
       return `<article class="card head-card"><h3>${title}</h3><p class="hint">${w.note || "Not enough later weeks."}</p></article>`;
     }
     const beat = w.beats_majority;
     return `<article class="card head-card">
       <h3>${title}</h3>
       <p class="hint">${w.n_hold} later mornings with a fresh hit in exactly one box.</p>
-      <div class="k">leftover named the box</div><div class="v">${pct(w.leftover_acc)} · always-guess ${w.majority_label || w.majority} ${pct(w.majority_acc)}${beat ? " · leftover wins" : " · leftover does not win"}</div>
+      <div class="k">model named the box</div><div class="v">${pct(freshAcc(w))} · always-guess ${w.majority_label || w.majority} ${pct(w.majority_acc)}${beat ? " · model wins" : " · model does not win"}</div>
     </article>`;
   };
   grid.insertAdjacentHTML("beforeend", `
@@ -1191,9 +1655,105 @@ function renderProbe(pack) {
       <p class="hint">${pack.note || leak}</p>
       <div class="watch-list">${shifts || '<p class="empty">Run <code>eqpred probe</code>.</p>'}</div>
     </article>
-    ${whereCard(pack.where_issued, "Which NZ box — leftover vs always-guess")}
-    ${whereCard(pack.where_transfer, "Japan vs Chile (practice) — leftover vs always-guess")}
+    ${whereCard(pack.where_issued, "Which NZ box — model vs always-guess")}
+    ${whereCard(pack.where_transfer, "Japan vs Chile (practice) — model vs always-guess")}
   `);
+}
+
+const PARAM_PLAIN = {
+  mu: "quakes that start on their own, per day",
+  k: "how strongly one quake triggers more",
+  alpha: "how much bigger quakes trigger more",
+  c: "settling time before triggering peaks (days)",
+  p: "how fast triggering fades",
+  m0: "smallest quake counted",
+};
+
+function renderCsep(pack) {
+  const table = $("csep-table");
+  const note = $("csep-note");
+  if (!table) return;
+  if (note && pack?.note) note.textContent = pack.note;
+  if (!pack?.boxes?.length) {
+    table.innerHTML = `<tbody>${emptyRow(6, "Run eqpred mainshock (writes CSEP) or eqpred csep.")}</tbody>`;
+    return;
+  }
+  const rows = (pack.boxes || []).map((b) => {
+    const tests = b.tests || {};
+    const n = tests.n || {};
+    const mol = tests.molchan || {};
+    const bits = ["N", "L", "T"].map((key) => {
+      const row = tests[key.toLowerCase()] || {};
+      if (row.pass === true) return `${key} pass`;
+      if (row.pass === false) return `${key} fail`;
+      return `${key} —`;
+    });
+    const ass = mol.area_skill_score;
+    return `<tr>
+      <td>${b.label || b.region}</td>
+      <td>${b.n_windows ?? "—"}</td>
+      <td>${n.n_observed == null ? "—" : `${Number(n.n_observed).toFixed(0)} / ${Number(n.n_forecast || 0).toFixed(1)}`}</td>
+      <td>${bits.join(" · ")}</td>
+      <td>${ass == null ? "—" : Number(ass).toFixed(3)}</td>
+      <td>${(b.passed || []).join(", ") || "none"}</td>
+    </tr>`;
+  }).join("");
+  const spatial = pack.spatial?.plain ? `<p class="hint">${pack.spatial.plain}</p>` : "";
+  table.innerHTML = `<thead><tr><th>Box</th><th>Windows</th><th>Hits / expected</th><th>N · L · T</th><th>Molchan skill</th><th>Passed</th></tr></thead><tbody>${
+    rows || emptyRow(6, "No CSEP rows.")
+  }</tbody>`;
+  if (spatial && note) note.textContent = `${pack.note || ""} ${pack.spatial.plain}`;
+}
+
+function renderAftershock(pack) {
+  const heads = $("aftershock-heads");
+  const table = $("aftershock-table");
+  const params = $("aftershock-params");
+  const note = $("aftershock-note");
+  if (!heads || !table || !params) return;
+  if (!pack) {
+    if (note) note.textContent = "Not run yet. Run eqpred aftershock to fill this in.";
+    heads.innerHTML = "";
+    table.innerHTML = `<tbody>${emptyRow(4, "Run eqpred aftershock.")}</tbody>`;
+    params.innerHTML = `<tbody>${emptyRow(2, "No fitted settings on disk.")}</tbody>`;
+    return;
+  }
+  if (note) note.textContent = pack.note || "";
+
+  heads.innerHTML = (pack.week || []).map((w) => `
+    <article class="card head-card">
+      <h3>${w.label} · M${w.magnitude_min}+</h3>
+      <div class="k">aftershock model, any quake</div><div class="v">${w.chance_plain || "—"}</div>
+      <div class="k">published fresh-shock call</div><div class="v">${w.fresh_chance_plain || "—"}</div>
+      <div class="k">typical year</div><div class="v">${w.climatology_chance_plain || "—"}</div>
+      ${w.foil_chance_plain ? `<div class="k">discarded foil (aftershock × gains)</div><div class="v">${w.foil_chance_plain}${w.foil_gain != null ? ` · ×${Number(w.foil_gain).toFixed(2)}` : ""}</div>` : ""}
+      <p class="hint">${w.sentence || ""}</p>
+    </article>
+  `).join("") || `<p class="empty">No boxes scored.</p>`;
+
+  const rows = (pack.scored || []).map((r) => {
+    const verdict = r.beats_climatology ? "beats the constant guess" : "does not beat the constant guess";
+    return `<tr>
+      <td>${r.label}</td>
+      <td>M${r.magnitude_min}+</td>
+      <td>${r.n_score ?? 0}</td>
+      <td>${r.hit_rate_holdout == null ? "—" : pct(r.hit_rate_holdout)}</td>
+      <td>${num(r.etas_brier, 4)}</td>
+      <td>${num(r.climatology_brier, 4)}</td>
+      <td>${verdict}</td>
+    </tr>`;
+  }).join("");
+  table.innerHTML = `<thead><tr><th>Box</th><th>Size</th><th>Weeks scored</th><th>How often it happened</th><th>Model error</th><th>Constant-guess error</th><th>Verdict</th></tr></thead><tbody>${
+    rows || emptyRow(7, "Not enough closed weeks.")
+  }</tbody>`;
+
+  const pRows = Object.entries(pack.params || {})
+    .filter(([, v]) => typeof v === "number")
+    .map(([k, v]) => `<tr><td>${PARAM_PLAIN[k] || k}</td><td>${num(v, 4)}</td></tr>`)
+    .join("");
+  params.innerHTML = `<thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody>${
+    pRows || emptyRow(2, "No fitted settings on disk.")
+  }</tbody>`;
 }
 
 function renderScoreboard(snap) {
@@ -1366,20 +1926,48 @@ async function loadLedger() {
   }
 }
 
-function flagList(features) {
-  if (!features) return "";
-  const names = [
-    ["spf_significant_window", "solar proton window"],
+function flagList(data) {
+  const items = Array.isArray(data?.watch) && data.watch.length
+    ? data.watch
+    : null;
+  const names = items || [
+    ["spf_significant_window", "solar polar-field window"],
     ["proton_spike", "proton spike"],
     ["kp_high", "magnetic storm (Kp)"],
     ["dst_storm", "magnetic storm (Dst)"],
+    ["ap_storm", "magnetic storm (Ap)"],
+    ["hss_on", "coronal-hole stream"],
+    ["flare_x_on", "X-class flare"],
+    ["spe_on", "solar protons"],
+    ["cme_halo", "halo CME"],
+    ["solar_eclipse_window", "solar eclipse"],
+    ["lunar_eclipse_window", "lunar eclipse"],
     ["near_new_or_full", "new or full moon"],
-  ];
-  return `<div class="flags">${names.map(([k, label]) => {
-    const on = Number(features[k] || 0) > 0.5;
-    return `<span class="flag ${on ? "on" : ""}">${label}${on ? " on" : ""}</span>`;
+    ["volcano_unrest", "volcanic unrest"],
+    ["sse_on", "Hikurangi slow slip"],
+    ["tremor_on", "Hikurangi / Alpine tremor"],
+    ["well_drop", "groundwater drop"],
+    ["scint_high", "ionosphere scintillation"],
+    ["haarp_on", "HAARP campaign"],
+    ["dart_drop", "ocean-bottom pressure drop"],
+    ["ulf_high", "ULF pulse"],
+    ["tec_storm", "TEC anomaly"],
+    ["radon_high", "radon spike"],
+    ["grace_wet", "GRACE water load"],
+    ["so2_high", "volcanic SO2"],
+    ["strain_pulse", "borehole strain"],
+    ["era5_wet", "hydrology load"],
+    ["olr_anomaly", "OLR anomaly"],
+    ["gnss_dilatation", "GPS dilatation"],
+  ].map(([id, label]) => ({
+    id,
+    label,
+    on: Number(data?.features?.[id] || 0) > 0.5,
+  }));
+  return `<div class="flags">${names.map((item) => {
+    return `<span class="flag ${item.on ? "on" : ""}">${item.label}${item.on ? " on" : ""}</span>`;
   }).join("")}</div>
-  <p class="hint">These leftover signals were known that morning. They are in our experimental call.</p>`;
+  <p class="hint">These non-catalog signals were known that morning. They feed the published chance.</p>`;
 }
 
 function dayHtml(data) {
@@ -1389,7 +1977,7 @@ function dayHtml(data) {
     return `<tr class="${cls}">
       <td>${c.label || c.model_id}</td>
       <td>${c.place_short || placeShort(c.region_name)} M≥${c.magnitude_min}</td>
-      <td>${c.leftover_sentence || c.sentence || `${anti ? "stays quiet" : "chance"} ${heroChance(c)}`}</td>
+      <td>${c.fresh_sentence || c.leftover_sentence || c.sentence || `${anti ? "stays quiet" : "chance"} ${heroChance(c)}`}</td>
       <td>${c.etas_chance_plain || (c.competitor_etas_p == null ? "—" : chance(c.competitor_etas_p))}</td>
       <td><span class="pill ${cls}">${outcome}</span>${nearHint(c)}</td>
     </tr>`;
@@ -1398,9 +1986,9 @@ function dayHtml(data) {
     `<tr><td>${(q.observed_at || "").replace("T", " ").slice(0, 16)}</td><td>M ${num(q.magnitude, 1)}</td><td>${q.place || ""}</td></tr>`
   ).join("");
   return `
-    ${flagList(data.features)}
+    ${flagList(data)}
     <div class="table-wrap"><table><thead><tr><th>Kind</th><th>Place</th><th>We said</th><th>Aftershock model</th><th>What happened</th></tr></thead><tbody>${cards || emptyRow(5, "No calls that morning.")}</tbody></table></div>
-    <h3>Large quakes in the next 20 days</h3>
+    <h3>Large quakes in the next ${data.horizon_days || 30} days</h3>
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Magnitude</th><th>Place</th></tr></thead><tbody>${quakes || emptyRow(3, "None.")}</tbody></table></div>
   `;
 }
@@ -1682,9 +2270,19 @@ function wireUi() {
   $("brain-go")?.addEventListener("click", retrainBrain);
   $("globe-nz")?.addEventListener("click", lookAtNZ);
   $("globe-earth")?.addEventListener("click", lookAtEarth);
+  $("globe-zoom-in")?.addEventListener("click", () => zoomGlobe(GLOBE_ZOOM_IN));
+  $("globe-zoom-out")?.addEventListener("click", () => zoomGlobe(GLOBE_ZOOM_OUT));
   $("globe-spin")?.addEventListener("click", () => setGlobeSpin(!state.globeSpin));
-  document.querySelectorAll("[data-leftover-mode]").forEach((btn) => {
-    btn.addEventListener("click", () => setLeftoverMode(btn.dataset.leftoverMode));
+  document.querySelectorAll("[data-fresh-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => setFreshMode(btn.dataset.freshMode));
+  });
+  document.querySelectorAll("[data-scroll]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = document.getElementById(btn.dataset.scroll);
+      if (!target) return;
+      showTab("lab");
+      requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
+    });
   });
   $("drawer-close")?.addEventListener("click", closeDrawer);
   document.querySelectorAll("[data-drawer-close]").forEach((el) => {
@@ -1703,7 +2301,7 @@ function wireUi() {
 async function boot() {
   try {
     const stored = localStorage.getItem(MODE_STORE);
-    if (stored === "lastweek" || stored === "all") state.leftoverMode = stored;
+    if (stored === "lastweek" || stored === "all") state.freshMode = stored;
   } catch (_) {
     /* ignore */
   }
@@ -1720,9 +2318,11 @@ async function boot() {
   try {
     state.snap = await get("/api/snapshot", 3);
     await loadFreshHunt(state.snap);
+    await loadSequenceHunt(state.snap);
     await Promise.all([bench, mind, globe]);
     renderOverview(state.snap);
     renderScoreboard(state.snap);
+    renderEarth(state.snap.earth_state);
     applyLedgerFilters({ ...storedFilters(), ...incoming.filters });
     showTab(incoming.tab, incoming.source);
     await loadLedger();

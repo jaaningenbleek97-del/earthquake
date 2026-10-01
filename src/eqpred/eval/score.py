@@ -75,9 +75,12 @@ def score_predictions(root: Path | None = None) -> pd.DataFrame:
                 "prediction_id": card["prediction_id"],
                 "model_id": card["model_id"],
                 "issued_at": card["issued_at"],
+                "written_at": card.get("written_at"),
+                "card_kind": card.get("card_kind") or "retrospective",
                 "kind": card["kind"],
                 "value": card["value"],
                 "competitor_etas_p": card.get("competitor_etas_p"),
+                "competitor_climatology_p": card.get("competitor_climatology_p"),
                 "magnitude_min": card["magnitude_min"],
                 "region": region.get("name", region.get("kind")),
                 "window_closed": bool(closed),
@@ -104,6 +107,13 @@ def summarize_ledger(ledger: pd.DataFrame) -> dict:
     scored = _scored_rows(ledger)
     out["n_scored"] = int(len(scored))
     out["n_open_windows"] = int(len(ledger) - len(scored))
+    if "card_kind" in ledger.columns:
+        kinds = ledger["card_kind"].fillna("retrospective")
+        out["n_prospective"] = int((kinds == "prospective").sum())
+        out["n_retrospective"] = int((kinds == "retrospective").sum())
+    else:
+        out["n_prospective"] = 0
+        out["n_retrospective"] = int(len(ledger))
     if scored.empty:
         return out
     calendar_days = max(int(ledger["issued_at"].nunique()), 1)

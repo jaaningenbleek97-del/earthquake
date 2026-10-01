@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-"""Promote gate. Issued p changes only if walk-forward beats ETAS and always-on.
+"""Promote chip. Does not lock or rewrite issued p.
 
-Until then this writes data/eval/promote.json and never writes model files.
+Issued cards are the fresh-shock model. This score asks whether that
+model beat climatology / ETAS on later years.
 """
 
 import json
@@ -40,7 +41,7 @@ def evaluate_promote(brain: dict[str, Any] | None) -> dict[str, Any]:
     passed = bool(lift_ok and brier_ok)
     if passed:
         reason = (
-            f"walk-forward lift {float(wf) * 100:+.1f} pt and leftover error "
+            f"walk-forward lift {float(wf) * 100:+.1f} pt and fresh-shock error "
             f"{float(brier):.4f} < ETAS {float(etas):.4f}"
         )
     else:
@@ -48,8 +49,8 @@ def evaluate_promote(brain: dict[str, Any] | None) -> dict[str, Any]:
         if not lift_ok:
             bits.append("walk-forward lift is not above always-on")
         if not brier_ok:
-            bits.append("leftover error is not better than ETAS")
-        reason = "; ".join(bits) or "gate failed"
+            bits.append("fresh-shock error is not better than ETAS")
+        reason = "; ".join(bits) or "chip failed"
     return {
         "pass": passed,
         "writes_issued_p": False,
@@ -65,8 +66,8 @@ def run_promote(root: Path | None = None, brain: dict[str, Any] | None = None) -
     report = evaluate_promote(brain if brain is not None else load_brain(root))
     report["scanned_at"] = iso(datetime.now(timezone.utc))
     report["note"] = (
-        f"Promote {'passed' if report['pass'] else 'held'}: {report['reason']}. "
-        "Issued p was not rewritten."
+        f"Promote {'passed' if report['pass'] else 'held'} as a score chip: {report['reason']}. "
+        "Issued cards stay the fresh-shock model. This chip does not lock or rewrite p."
     )
     dest = data_dir(root) / "eval"
     dest.mkdir(parents=True, exist_ok=True)

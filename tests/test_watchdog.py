@@ -39,6 +39,19 @@ def _write_required(root: Path, available: datetime):
         _write_source(root, source, available)
 
 
+def test_coverage_report_flags_missing_and_gaps(tmp_path):
+    from eqpred.ingest.watchdog import coverage_report
+
+    as_of = _stamp(2025, 12, 31)
+    _write_required(tmp_path, as_of)
+    _write_source(tmp_path, "eqdb.tremor", as_of, _stamp(2025, 12, 30))
+    report = coverage_report(as_of, tmp_path)
+    by_name = {row["source"]: row for row in report["sources"]}
+    assert by_name["usgs.comcat"]["verdict"] == "complete"
+    assert by_name["eqdb.tremor"]["n_rows"] == 1
+    assert "hydro.wells" in report["missing"]
+
+
 def test_fresh_required_sources_pass(tmp_path):
     as_of = _stamp(2025, 12, 31)
     _write_required(tmp_path, as_of)
@@ -191,6 +204,27 @@ def test_merge_daily_frames_keeps_history():
         "2026-02-01",
     ]
     assert float(merged.loc[merged["kp"] == 3.5, "kp"].iloc[0]) == 3.5
+
+
+def test_merge_daily_frames_keeps_other_columns():
+    old = pd.DataFrame(
+        {
+            "observed_at": ["2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z"],
+            "solar_tsi_wm2": [1361.0, 1361.1],
+            "solar_mgii": [0.26, 0.27],
+        }
+    )
+    new = pd.DataFrame(
+        {
+            "observed_at": ["2020-01-02T00:00:00Z", "2020-01-03T00:00:00Z"],
+            "solar_tsi_wm2": [float("nan"), 1362.0],
+            "solar_mgii": [0.16, 0.17],
+        }
+    )
+    merged = merge_daily_frames(old, new)
+    day2 = merged.loc[merged["observed_at"].str.startswith("2020-01-02")].iloc[0]
+    assert float(day2["solar_tsi_wm2"]) == 1361.1
+    assert float(day2["solar_mgii"]) == 0.16
 
 
 def test_merge_event_frames_keeps_history():

@@ -115,8 +115,13 @@ def significant_windows(
     spf: pd.DataFrame,
     quakes: pd.DataFrame | None = None,
     version: str = "v2",
+    train_end: str | pd.Timestamp | None = None,
 ) -> pd.Series:
-    """Boolean daily series: True if the frozen Significant Window is on."""
+    """Boolean daily series: True if the frozen Significant Window is on.
+
+    `train_end` locks the "how loud is loud" thresholds to the training era, so
+    a 1995 window is not judged against solar peaks from later holdout years.
+    """
     cfg = V2 if version == "v2" else V1
     daily = _daily_spf(spf)
     n = len(daily)
@@ -133,12 +138,22 @@ def significant_windows(
     stacked = np.abs(np.vstack(list(series_map.values())))
     if not np.isfinite(stacked).any():
         return pd.Series(on, index=daily["observed_at"], name=name)
+    # Thresholds come from the training era only; the windows themselves still
+    # span the whole series.
+    era = np.ones(n, dtype=bool)
+    if train_end is not None:
+        era = pd.DatetimeIndex(daily["observed_at"]) <= utc_ts(train_end)
+        if not era.any():
+            era = np.ones(n, dtype=bool)
     strength = np.full(n, np.nan)
     ok = np.isfinite(stacked).any(axis=0)
     if ok.any():
         with np.errstate(all="ignore"):
             strength[ok] = np.nanmax(stacked[:, ok], axis=0)
-            p95 = float(np.nanpercentile(strength[ok], 95) or 1.0)
+            train_strength = strength[ok & era]
+            if not np.isfinite(train_strength).any():
+                train_strength = strength[ok]
+            p95 = float(np.nanpercentile(train_strength, 95) or 1.0)
     else:
         return pd.Series(on, index=daily["observed_at"], name=name)
     if not np.isfinite(p95) or p95 <= 0:
@@ -146,7 +161,9 @@ def significant_windows(
 
     for key in cfg["peaks_on"]:
         series = series_map[key]
-        finite = np.abs(series[np.isfinite(series)])
+        finite = np.abs(series[np.isfinite(series) & era])
+        if not finite.size:
+            finite = np.abs(series[np.isfinite(series)])
         qcut = float(np.quantile(finite, cfg["peak_quantile"])) if finite.size else 0.0
         min_abs = max(float(cfg["peak_min_abs"]), qcut)
         peaks, troughs = _local_extrema(series)
@@ -167,7 +184,7 @@ def significant_windows(
             if is_avg and idx - last_avg_rev < int(cfg["reversal_gap"]):
                 continue
             if not is_avg:
-                look = series[idx : min(n, idx + 40)]
+                look = series[max(0, idx - 40) : idx + 1]
                 if look.size and np.nanmax(np.abs(look)) < float(cfg["reversal_intensity"]):
                     continue
             if is_avg:

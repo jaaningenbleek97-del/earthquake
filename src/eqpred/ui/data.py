@@ -14,15 +14,27 @@ from eqpred.ingest.run import try_latest_raw
 from eqpred.ingest.watchdog import freshness_report
 from eqpred.eval.backtest import load_backtest
 from eqpred.eval.brain import load_brain
-from eqpred.eval.hunt import load_hunt, load_hunt_fresh
+from eqpred.eval.aftershock import load_aftershock
+from eqpred.eval.compat import saved_fresh
+from eqpred.eval.csep import load_csep
+from eqpred.eval.horizon import HORIZON_DAYS
+from eqpred.eval.hunt import load_hunt, load_hunt_fresh, load_hunt_sequence
 from eqpred.eval.foreshock import foreshock_week_copy, load_foreshock
-from eqpred.eval.mainshock import leftover_week_copy, load_mainshock
+from eqpred.eval.mainshock import FRESH_MODEL_ID, ISSUED_TARGETS, fresh_week_copy, load_mainshock
+from eqpred.eval.waiting import catalog_wait, odd_box
 from eqpred.eval.probe import load_probe
 from eqpred.eval.promote import load_promote
 from eqpred.eval.transfer import load_transfer
 from eqpred.models.registry import load_current, load_index
 from eqpred.models.gr import load_gr
-from eqpred.models.leftover import lam0_from_etas_p, leftover_p, watch_list
+from eqpred.eval.earth_state import load_earth_state
+from eqpred.eval.circus import load_circus
+from eqpred.eval.leftover import load_leftover
+from eqpred.eval.leftover_look import load_leftover_look
+from eqpred.eval.eepas import load_eepas
+from eqpred.eval.widenet import load_widenet
+from eqpred.eval.das_foil import load_das_foil
+from eqpred.models.garnish import garnish_p, lam0_from_etas_p, watch_list
 from eqpred.models.predict import BOX_MAG, GLOBAL_MAG
 from eqpred.regions import (
     REGIONS,
@@ -35,8 +47,11 @@ from eqpred.regions import (
 from eqpred.paths import data_dir, feature_dir, model_dir, prediction_batches, prediction_dir
 from eqpred.stamp import parse_utc, utc_ts
 
+ISSUED_P_MODELS = frozenset({FRESH_MODEL_ID, "fusion.etas_x_mod.v1"})
+
 MODEL_LABELS = {
-    "fusion.etas_x_mod.v1": "This week's chance",
+    FRESH_MODEL_ID: "This week's chance",
+    "fusion.etas_x_mod.v1": "This week's chance (older aftershock ledger)",
     "alarm.spf.v2": "Rare huge-quake alert",
     "alarm.spf.v1": "Rare huge-quake alert (older)",
     "alarm.quiet.v1": "Quiet-week M7 alert",
@@ -66,7 +81,8 @@ PLACE_PLAIN = {
 }
 
 HEAD_PLAIN = {
-    "fusion.etas_x_mod.v1": "Chance from the aftershock model",
+    FRESH_MODEL_ID: "Chance from the fresh-shock model",
+    "fusion.etas_x_mod.v1": "Chance from the older aftershock ledger",
     "alarm.spf.v2": "A rare alert for a magnitude 8 or larger quake",
     "alarm.spf.v1": "A rare alert for a magnitude 8 or larger quake",
     "alarm.quiet.v1": "An alert for a magnitude 7+ quake in an unusually quiet week",
@@ -84,7 +100,7 @@ BATTERY_BLURB = {
     "marchitelli_proton_lag1_m6": "Proton density the day before M6 vs background.",
     "marchitelli_proton_lag1_m6_declustered": "Same proton test after dropping aftershocks.",
     "love_thomas_indices_vs_m5": "Correlation of Kp / Dst / sunspots with daily M5 counts. Near zero is the skeptic null.",
-    "fusion_issued_m7": "What we issue: train-Brier calibrated ETAS only. Nowcast, TEC, Coulomb, cusp, wave2, and migration are fit for paper scores and stay off issued p — they lost to scale-only on holdout.",
+    "fusion_issued_m7": "Lab foil: train-Brier calibrated ETAS. Not the issued product. Nowcast, TEC, Coulomb, cusp, wave2, and migration stay off the foil too — they lost to scale-only on holdout.",
     "fusion_nowcast_m7": "Calibrated ETAS × trailing b / energy nowcast. Residual catalog physics, not solar.",
     "fusion_modulator_m7": "Abandoned recipe: locked solar g × ETAS. Kept so we can see it still is not timing skill.",
     "fusion_timeshift_180d": "Abandoned g with solar drivers shifted 180 days. If this still beats ETAS, timing is not the skill.",
@@ -189,18 +205,27 @@ def _joined_ledger(root: Path | None = None) -> pd.DataFrame:
     return merged
 
 
-def _trim_hunt(pack: dict | None, n: int = 40) -> dict | None:
+def _trim_hunt(pack: dict | None, n: int = 40, *, keep_catalog: bool = False) -> dict | None:
     if not pack:
         return pack
     out = dict(pack)
 
-    def _leftover_first(rows: list) -> list:
-        leftover = [r for r in rows if r.get("family") not in {"catalog", "migration"}]
-        leftover.sort(key=lambda r: abs(float(r.get("holdout_rho") or r.get("train_rho") or 0)), reverse=True)
-        return leftover[:n]
+    def _first(rows: list) -> list:
+        rows = list(rows or [])
+        if not keep_catalog:
+            rows = [r for r in rows if r.get("family") not in {"catalog", "migration"}]
+        rows.sort(key=lambda r: abs(float(r.get("holdout_rho") or r.get("train_rho") or 0)), reverse=True)
+        return rows[:n]
 
-    out["confirmed"] = _leftover_first(list(pack.get("confirmed") or []))
-    out["loudest_train"] = _leftover_first(list(pack.get("loudest_train") or []))
+    out["confirmed"] = _first(list(pack.get("confirmed") or []))
+    out["loudest_train"] = _first(list(pack.get("loudest_train") or []))
+    honest = pack.get("honest")
+    if isinstance(honest, dict):
+        trimmed = dict(honest)
+        for key in ("confirmed", "beats_climate", "families", "quiet", "m8", "loudest_train"):
+            if key in trimmed:
+                trimmed[key] = _first(list(trimmed.get(key) or []))
+        out["honest"] = trimmed
     return out
 
 
@@ -266,24 +291,22 @@ def snapshot(root: Path | None = None) -> dict:
             stats = {**stats, "budget_days_per_month": int(caps[model_id])}
         heads.append({"label": label, **stats})
 
-    mainshock = load_mainshock(root)
+    mainshock = _with_catalog_wait(load_mainshock(root), root)
     foreshock = load_foreshock(root)
-    honesty = leftover_week_copy(mainshock)
+    honesty = fresh_week_copy(mainshock)
     precursor = foreshock_week_copy(foreshock)
     manifesto = (
-        "This lab tries to predict a fresh large earthquake — the first big shock, "
-        "not the aftershocks that follow. It looks at as many leftover sources as "
-        "we can timestamp (space weather, tides, ionosphere, GPS, and the rest), "
-        "then backtests the call on later years. Aftershock rates are the thing "
-        "we refuse to ship as the product."
+        "This lab publishes a dated chance of a first large quake, not the aftershocks that follow. "
+        "A typical five-year rate sits beside each call. The aftershock model is a second opinion."
     )
     return {
         "title": "Earthquake prediction lab",
         "what": (
-            "Dated calls, scored against ComCat. Issued p is calibrated ETAS. "
-            "Solar g is a diagnostic, not the number. Promote has not rewritten issued p."
+            "Dated calls, scored against the earthquake catalog. "
+            "The published chance is the first-large-quake model. "
+            "A typical year sits beside it. The aftershock model is a second opinion."
         ),
-        "what_plain": honesty["lede"] if honesty["held"] else manifesto,
+        "what_plain": honesty.get("lede") or manifesto,
         "catalog": {
             "n_events": n_quakes,
             "n_m8": n_m8,
@@ -349,6 +372,11 @@ def snapshot(root: Path | None = None) -> dict:
         "n_cards": int(summary.get("n_cards") or 0),
         "n_scored": int(summary.get("n_scored") or 0),
         "n_open_windows": int(summary.get("n_open_windows") or 0),
+        "n_prospective": int(summary.get("n_prospective") or 0),
+        "n_retrospective": int(summary.get("n_retrospective") or 0),
+        "prospective_epoch_start": ((mainshock or {}).get("evaluation") or {}).get(
+            "prospective_epoch_start"
+        ),
         "watchdog": freshness_report(datetime.now(timezone.utc), root),
         "registry": _registry_snapshot(root),
         "heads": heads,
@@ -356,15 +384,25 @@ def snapshot(root: Path | None = None) -> dict:
         "battery": battery,
         "hunt": _trim_hunt(load_hunt(root)),
         "hunt_fresh": _trim_hunt(load_hunt_fresh(root)),
+        "hunt_sequence": _trim_hunt(load_hunt_sequence(root), keep_catalog=True),
         "backtest": load_backtest(root),
         "brain": load_brain(root),
         "mainshock": mainshock,
+        "aftershock": load_aftershock(root),
+        "csep": load_csep(root),
         "foreshock": foreshock,
         "foreshock_copy": precursor,
         "probe": load_probe(root),
         "transfer": load_transfer(root),
         "promote": load_promote(root),
         "strategies": _load_strategies(root),
+        "earth_state": load_earth_state(root),
+        "leftover": load_leftover(root),
+        "leftover_look": load_leftover_look(root),
+        "eepas": load_eepas(root),
+        "widenet": load_widenet(root),
+        "das_foil": load_das_foil(root),
+        "circus": load_circus(root),
         "episodes": quiet_episodes(ledger, quakes, _load_cards(root)) if not ledger.empty and not quakes.empty else [],
         "models": models,
         "regions": {
@@ -431,7 +469,7 @@ def day_view(day: str, root: Path | None = None) -> dict:
     issued = utc_ts(day)
     cards = _joined_ledger(root)
     if cards.empty:
-        return {"day": day, "cards": [], "features": None, "quakes": []}
+        return {"day": day, "horizon_days": HORIZON_DAYS, "cards": [], "features": None, "quakes": []}
     stamp = parse_utc(cards["issued_at"]) if "issued_at" in cards.columns else pd.Series(dtype="datetime64[ns, UTC]")
     day_cards = cards.loc[stamp.dt.floor("D") == issued]
     features_path = feature_dir(root) / "global_daily.parquet"
@@ -450,7 +488,7 @@ def day_view(day: str, root: Path | None = None) -> dict:
     if not quakes.empty:
         quakes = quakes.copy()
         quakes["observed_at"] = parse_utc(quakes["observed_at"])
-        window_end = issued + pd.Timedelta(days=20)
+        window_end = issued + pd.Timedelta(days=HORIZON_DAYS)
         near = quakes.loc[
             (quakes["observed_at"] >= issued)
             & (quakes["observed_at"] < window_end)
@@ -461,25 +499,19 @@ def day_view(day: str, root: Path | None = None) -> dict:
     catalogs = load_migration_catalogs(root)
     migration = {rid: cluster_asof(catalogs[rid], rid, issued) for rid in BOX_IDS}
 
-    mainshock = load_mainshock(root)
+    mainshock = _with_catalog_wait(load_mainshock(root), root)
     cards = [
-        _attach_leftover(card, feat_series, root)
-        if card.get("model_id") == "fusion.etas_x_mod.v1" and feat_series is not None
+        _attach_mainshock(card, mainshock, issue_day=day)
+        if card.get("model_id") in ISSUED_P_MODELS
         else card
         for card in _day_cards(day_cards)
     ]
-    issue_days = {w.get("issue_day") for w in (mainshock or {}).get("week") or []}
-    if day in issue_days:
-        cards = [
-            _attach_mainshock(card, mainshock)
-            if card.get("model_id") == "fusion.etas_x_mod.v1"
-            else card
-            for card in cards
-        ]
     return {
         "day": day,
+        "horizon_days": HORIZON_DAYS,
         "cards": cards,
         "features": feat_row,
+        "watch": watch_list(feat_row),
         "quakes": q_rows,
         "migration": migration,
     }
@@ -521,6 +553,10 @@ def feature_series(root: Path | None = None, start: str | None = None, end: str 
         "tidal_strain",
         "n_m6_7d",
         "n_m7_30d",
+        "n_fresh_m45_7d",
+        "n_fresh_m6_7d",
+        "n_fresh_m7_30d",
+        "days_since_fresh_m7",
         "coulomb_hikurangi",
         "coulomb_alpine",
         "coulomb_kermadec",
@@ -543,6 +579,51 @@ def feature_series(root: Path | None = None, start: str | None = None, end: str 
         "mag_h_range_nt",
         "mag_dbdt_nt",
         "mag_station",
+        "sunspot_north",
+        "sunspot_south",
+        "solar_eclipse_window",
+        "coronal_hole_stream",
+        "hss_on",
+        "flare_x_on",
+        "spe_on",
+        "solar_descending",
+        "polar_vortex_weak",
+        "volcano_unrest",
+        "dart_height_m",
+        "dart_drop",
+        "sse_on",
+        "tremor_on",
+        "well_drop",
+        "scint_high",
+        "haarp_on",
+        "dvv_drop",
+        "dvv_nz",
+        "wspr_quiet",
+        "wspr_snr_med",
+        "wiki_hot",
+        "wiki_eq_views",
+        "cal_payday",
+        "ulf_high",
+        "tec_storm",
+        "radon_high",
+        "radon_bq_m3",
+        "grace_wet",
+        "grace_hikurangi_lwe_cm",
+        "so2_high",
+        "so2_kermadec_kgm2",
+        "strain_pulse",
+        "era5_wet",
+        "olr_anomaly",
+        "gnss_dilatation",
+        "ssc_dst",
+        "sunspot_hemisphere_skew",
+        "earth_state_z",
+        "earth_state_unusual",
+        "graph_inflow_hikurangi",
+        "graph_inflow_alpine",
+        "graph_inflow_kermadec",
+        "graph_transfer_on",
+        "analog_p_global",
         "mig_along_hikurangi",
         "mig_along_alpine",
         "mig_along_kermadec",
@@ -591,7 +672,7 @@ def _chance_copy(value) -> str | None:
 
 def _question_plain(region_name: str, magnitude_min, horizon_days: int) -> str:
     mag = f"{float(magnitude_min):g}" if magnitude_min is not None else "?"
-    days = int(horizon_days or 7)
+    days = int(horizon_days or HORIZON_DAYS)
     window = "week" if days == 7 else f"{days} days"
     if str(region_name or "") == "global":
         return f"a magnitude {mag} or larger earthquake anywhere on Earth in the next {window}"
@@ -602,7 +683,7 @@ def _question_plain(region_name: str, magnitude_min, horizon_days: int) -> str:
 def _card_plain(rec: dict) -> dict:
     region_name = rec.get("region_name") or _region_key(rec.get("region"))
     model_id = rec.get("model_id")
-    horizon = int(rec.get("horizon_days") or 7)
+    horizon = int(rec.get("horizon_days") or HORIZON_DAYS)
     mag = rec.get("magnitude_min")
     kind = rec.get("kind")
     anti = str(model_id or "").startswith("anti.")
@@ -614,6 +695,9 @@ def _card_plain(rec: dict) -> dict:
     else:
         chance = _chance_copy(rec.get("value")) or "an unknown chance"
         sentence = f"We put the chance of {question} at {chance}."
+    climate = rec.get("competitor_climatology_p")
+    if climate is None:
+        climate = rec.get("climatology_p")
     rec = {
         **rec,
         "region_name": region_name,
@@ -623,12 +707,14 @@ def _card_plain(rec: dict) -> dict:
         "question_plain": question,
         "chance_plain": _chance_copy(rec.get("value")),
         "etas_chance_plain": _chance_copy(rec.get("competitor_etas_p")),
+        "climatology_p": climate,
+        "climatology_chance_plain": rec.get("climatology_chance_plain") or _chance_copy(climate),
         "sentence": sentence,
     }
     return rec
 
 
-def _attach_leftover(card: dict, feat_row, root: Path | None = None) -> dict:
+def _attach_garnish(card: dict, feat_row, root: Path | None = None) -> dict:
     if not card or feat_row is None:
         return card
     etas_p = card.get("competitor_etas_p")
@@ -645,68 +731,175 @@ def _attach_leftover(card: dict, feat_row, root: Path | None = None) -> dict:
             float(mag),
             float(gr.get("m0") or 4.5),
             float(gr.get("b") or 1.0),
-            float(card.get("horizon_days") or 7),
+            float(card.get("horizon_days") or HORIZON_DAYS),
         )
-        pack = leftover_p(
+        pack = garnish_p(
             lam0,
             feat_row,
             region_id,
             mag=float(mag),
-            horizon_days=int(card.get("horizon_days") or 7),
+            horizon_days=int(card.get("horizon_days") or HORIZON_DAYS),
             root=root,
         )
     except Exception:
         return card
     why = pack.get("why") or []
-    why_txt = ", ".join(why) if why else "the leftover mix"
+    why_txt = ", ".join(why) if why else "the garnish mix"
     question = card.get("question_plain") or "a large earthquake this week"
-    leftover_chance = _chance_copy(pack["leftover_p"])
+    garnish_chance = _chance_copy(pack["garnish_p"])
     card = {
         **card,
-        "leftover_p": pack["leftover_p"],
-        "leftover_chance_plain": leftover_chance,
-        "leftover_gain": pack["leftover_gain"],
-        "leftover_parts": pack["parts"],
-        "leftover_why": why,
-        "leftover_sentence": (
-            f"An unused leftover mix would put the chance of {question} at {leftover_chance}, "
+        "garnish_p": pack["garnish_p"],
+        "garnish_chance_plain": garnish_chance,
+        "garnish_gain": pack["garnish_gain"],
+        "garnish_parts": pack["parts"],
+        "garnish_why": why,
+        "garnish_sentence": (
+            f"An unused garnish mix would put the chance of {question} at {garnish_chance}, "
             f"using {why_txt}."
         ),
     }
     return card
 
 
-def _attach_mainshock(card: dict, pack: dict | None) -> dict:
-    """Our call is the leftover AI for a fresh big quake, not ETAS × leftover."""
-    if not card or not pack:
+def _attach_mainshock(card: dict, pack: dict | None, *, issue_day: str | None = None) -> dict:
+    """Hero number is the fresh-shock model. Climatology sits beside it."""
+    if not card:
         return card
     rid = _region_key(card.get("region")) or card.get("region_name") or ""
     if rid == "alpine_fault":
         rid = "alpine"
     if rid in {"", "global"}:
         rid = "global"
-    match = next((row for row in pack.get("week") or [] if row.get("region") == rid), None)
+    match = next((row for row in (pack or {}).get("week") or [] if row.get("region") == rid), None)
+    if issue_day and match:
+        tw_day = str(match.get("issue_day") or "")[:10]
+        viewed = str(issue_day)[:10]
+        if tw_day and viewed and tw_day != viewed:
+            return card
     if not match:
-        return _attach_last_week(card, pack)
+        # No mainshock row for this box. Fall back to the card's own issued p —
+        # never to garnish_p, which is the ETAS foil and not a fresh-shock call.
+        value = card.get("value")
+        climate = card.get("climatology_p")
+        if climate is None:
+            climate = card.get("competitor_climatology_p")
+        card = {
+            **card,
+            "fresh_p": value,
+            "fresh_chance_plain": card.get("fresh_chance_plain") or _chance_copy(value),
+            "fresh_raw_p": value,
+            "fresh_raw_chance_plain": card.get("fresh_raw_chance_plain") or _chance_copy(value),
+            "climatology_p": climate,
+            "climatology_chance_plain": card.get("climatology_chance_plain") or _chance_copy(climate),
+            "mainshock": card.get("model_id") in ISSUED_P_MODELS,
+        }
+        return _attach_sidecars(card, pack)
     held = bool(match.get("held_to_climatology"))
     why = list(match.get("why") or [])
-    leftover_raw = match.get("leftover_raw_p")
-    leftover_raw_chance = match.get("leftover_raw_chance_plain") or _chance_copy(leftover_raw)
+    fresh_raw = saved_fresh(match, "fresh_raw_p")
+    fresh_raw_chance = saved_fresh(match, "fresh_raw_chance_plain") or _chance_copy(fresh_raw)
+    climate = match.get("climatology_p")
+    if climate is None:
+        climate = card.get("competitor_climatology_p")
+    hero = fresh_raw if fresh_raw is not None else match.get("p")
+    hero_chance = match.get("fresh_raw_chance_plain") or match.get("chance_plain") or _chance_copy(hero)
     card = {
         **card,
-        "leftover_p": leftover_raw,
-        "leftover_chance_plain": leftover_raw_chance,
-        "leftover_raw_p": leftover_raw,
-        "leftover_raw_chance_plain": leftover_raw_chance,
-        "leftover_why": why,
+        "fresh_p": hero,
+        "fresh_chance_plain": hero_chance,
+        "fresh_raw_p": fresh_raw,
+        "fresh_raw_chance_plain": fresh_raw_chance,
+        "fresh_why": why,
         "held_to_climatology": held,
-        "leftover_parts": [{"name": name, "label": name, "gain": None} for name in why],
-        "leftover_sentence": match.get("sentence"),
-        "climatology_p": match.get("climatology_p"),
-        "climatology_chance_plain": match.get("climatology_chance_plain"),
+        "fresh_parts": [{"name": name, "label": name, "gain": None} for name in why],
+        "fresh_sentence": match.get("sentence"),
+        "week_state": match.get("week_state") or ("rate" if held else "beat"),
+        "traffic_light": match.get("traffic_light"),
+        "traffic_sentence": match.get("traffic_sentence"),
+        "climatology_p": climate,
+        "climatology_chance_plain": match.get("climatology_chance_plain") or _chance_copy(climate),
+        "wait_days": match.get("wait_days"),
+        "wait_since_days": match.get("wait_since_days"),
+        "wait_plain": match.get("wait_plain"),
+        "neighborhood_plain": match.get("neighborhood_plain"),
         "mainshock": True,
     }
-    return _attach_last_week(card, pack)
+    return _attach_sidecars(card, pack)
+
+
+def _attach_sidecars(card: dict, pack: dict | None) -> dict:
+    return _attach_alpine_sequence(_attach_shrunk(_attach_last_week(card, pack), pack), pack)
+
+
+def _annotate_explain(pack: dict, root: Path | None) -> dict:
+    """Add the neighborhood, agreement, and three-story lines. Chances stay as saved."""
+    from eqpred.eval.explain import read_explain
+
+    explain = read_explain(root) or {}
+    out = dict(pack)
+    out["story"] = explain.get("story")
+    out["agreement_exam"] = explain.get("agreement_exam")
+    neighborhoods = explain.get("neighborhoods") or {}
+    week = []
+    for row in pack.get("week") or []:
+        copied = dict(row)
+        extra = neighborhoods.get(str(copied.get("region") or ""))
+        if extra and extra.get("plain"):
+            copied["neighborhood_plain"] = extra["plain"]
+        week.append(copied)
+    out["week"] = week
+    agreements = explain.get("agreements") or {}
+    short = []
+    for row in pack.get("short_horizons") or []:
+        copied = dict(row)
+        if int(copied.get("horizon_days") or 0) == 3:
+            extra = agreements.get(str(copied.get("region") or ""))
+            if extra and extra.get("plain"):
+                copied["agreement_plain"] = extra["plain"]
+        short.append(copied)
+    if pack.get("short_horizons") is not None:
+        out["short_horizons"] = short
+    return out
+
+
+def _with_catalog_wait(pack: dict | None, root: Path | None = None) -> dict | None:
+    """Add the catalog waiting time onto the 30-day rows. The chance itself is unchanged."""
+    if not pack:
+        return pack
+    from eqpred.catalog import load_comcat
+    from eqpred.eval.vote_freeze import score_frozen_ledger
+
+    week = [dict(row) for row in pack.get("week") or []]
+    issue = next(
+        (
+            row.get("issue_day")
+            for row in week
+            if row.get("issue_day") and int(row.get("horizon_days") or 30) == 30
+        ),
+        None,
+    )
+    if issue is None:
+        pack = dict(pack)
+        pack["frozen_score"] = score_frozen_ledger(load_comcat(root), root)
+        return _annotate_explain(pack, root)
+    quakes = load_comcat(root)
+    when = utc_ts(str(issue)[:10])
+    waits = {
+        rid: catalog_wait(quakes, REGIONS[rid], mag, when)
+        for rid, mag in ISSUED_TARGETS
+    }
+    for row in week:
+        if int(row.get("horizon_days") or 30) != 30:
+            continue
+        extra = waits.get(str(row.get("region") or ""))
+        if extra:
+            row.update(extra)
+    out = dict(pack)
+    out["week"] = week
+    out["odd_box"] = odd_box(quakes, when)
+    out["frozen_score"] = score_frozen_ledger(quakes, root)
+    return _annotate_explain(out, root)
 
 
 def _attach_last_week(card: dict, pack: dict | None) -> dict:
@@ -721,17 +914,70 @@ def _attach_last_week(card: dict, pack: dict | None) -> dict:
     match = next((row for row in lw.get("week") or [] if row.get("region") == rid), None)
     if not match:
         return card
-    leftover_raw = match.get("leftover_raw_p")
-    leftover_raw_chance = match.get("leftover_raw_chance_plain") or _chance_copy(leftover_raw)
+    held = bool(match.get("held_to_climatology"))
+    fresh_raw = saved_fresh(match, "fresh_raw_p")
+    fresh_raw_chance = saved_fresh(match, "fresh_raw_chance_plain") or _chance_copy(fresh_raw)
+    hero = fresh_raw if fresh_raw is not None else match.get("p")
+    hero_chance = match.get("fresh_raw_chance_plain") or match.get("chance_plain") or _chance_copy(hero)
     return {
         **card,
-        "last_week_p": leftover_raw,
-        "last_week_chance_plain": leftover_raw_chance,
+        "last_week_p": hero,
+        "last_week_chance_plain": hero_chance,
+        "last_week_raw_p": fresh_raw,
+        "last_week_raw_chance_plain": fresh_raw_chance,
         "last_week_why": list(match.get("why") or []),
-        "last_week_held": bool(match.get("held_to_climatology")),
+        "last_week_held": held,
         "last_week_sentence": match.get("sentence"),
         "last_week_climatology_p": match.get("climatology_p"),
         "last_week_climatology_chance_plain": match.get("climatology_chance_plain"),
+    }
+
+
+def _attach_shrunk(card: dict, pack: dict | None) -> dict:
+    if not card or not pack:
+        return card
+    sh = pack.get("shrunk") or {}
+    rid = _region_key(card.get("region")) or card.get("region_name") or ""
+    if rid == "alpine_fault":
+        rid = "alpine"
+    if rid in {"", "global"}:
+        rid = "global"
+    match = next((row for row in sh.get("week") or [] if row.get("region") == rid), None)
+    if not match:
+        return card
+    raw = saved_fresh(match, "fresh_raw_p")
+    return {
+        **card,
+        "shrunk_p": raw if raw is not None else match.get("p"),
+        "shrunk_chance_plain": match.get("fresh_raw_chance_plain") or match.get("chance_plain") or _chance_copy(raw),
+        "shrunk_held": bool(match.get("held_to_climatology")),
+        "shrunk_sentence": match.get("sentence"),
+        "shrunk_climatology_chance_plain": match.get("climatology_chance_plain"),
+        "shrunk_why": list(match.get("why") or []),
+    }
+
+
+def _attach_alpine_sequence(card: dict, pack: dict | None) -> dict:
+    if not card or not pack:
+        return card
+    al = pack.get("alpine_sequence") or {}
+    rid = _region_key(card.get("region")) or card.get("region_name") or ""
+    if rid == "alpine_fault":
+        rid = "alpine"
+    if rid != "alpine":
+        return {**card, "alpine_sequence_applied": bool(al.get("applied"))}
+    match = next((row for row in al.get("week") or [] if row.get("region") == "alpine"), None)
+    if not match:
+        return {**card, "alpine_sequence_applied": bool(al.get("applied"))}
+    raw = saved_fresh(match, "fresh_raw_p")
+    return {
+        **card,
+        "alpine_sequence_p": raw if raw is not None else match.get("p"),
+        "alpine_sequence_chance_plain": match.get("fresh_raw_chance_plain") or match.get("chance_plain") or _chance_copy(raw),
+        "alpine_sequence_held": bool(match.get("held_to_climatology")),
+        "alpine_sequence_sentence": match.get("sentence"),
+        "alpine_sequence_applied": bool(al.get("applied")),
+        "alpine_sequence_climatology_chance_plain": match.get("climatology_chance_plain"),
     }
 
 
@@ -764,28 +1010,21 @@ def globe_view(root: Path | None = None) -> dict:
     cards = _joined_ledger(root)
     latest = _latest_issue_day(cards)
     week_rows: list[dict] = []
-    mainshock = load_mainshock(root)
+    mainshock = _with_catalog_wait(load_mainshock(root), root)
     if latest is not None and not cards.empty:
         stamp = parse_utc(cards["issued_at"])
         day_cards = cards.loc[stamp.dt.floor("D") == latest]
         week_rows = [_card_plain(rec) for rec in _day_cards(day_cards)]
-        feat_row = _feature_row(latest, root)
-        if feat_row is not None:
-            week_rows = [
-                _attach_leftover(row, feat_row, root)
-                if row.get("model_id") == "fusion.etas_x_mod.v1"
-                else row
-                for row in week_rows
-            ]
-        if mainshock:
-            week_rows = [
-                _attach_mainshock(row, mainshock)
-                if row.get("model_id") == "fusion.etas_x_mod.v1"
-                else row
-                for row in week_rows
-            ]
+        week_rows = [
+            _attach_mainshock(row, mainshock)
+            if row.get("model_id") in ISSUED_P_MODELS
+            else row
+            for row in week_rows
+        ]
 
-    fusion = [c for c in week_rows if c.get("model_id") == "fusion.etas_x_mod.v1"]
+    fusion = [c for c in week_rows if c.get("model_id") == FRESH_MODEL_ID]
+    if not fusion:
+        fusion = [c for c in week_rows if c.get("model_id") == "fusion.etas_x_mod.v1"]
     global_card = next((c for c in fusion if _region_key(c.get("region")) in {"global", ""} and c.get("region_name") == "global"), None)
     if global_card is None:
         global_card = next((c for c in fusion if c.get("region_name") == "global"), None)
@@ -821,7 +1060,7 @@ def globe_view(root: Path | None = None) -> dict:
                 "polygons": leaflet_rectangles(region),
                 "card": match,
                 "anti": anti,
-                "question_plain": _question_plain(region.get("name") or rid, mag, 7),
+                "question_plain": _question_plain(region.get("name") or rid, mag, HORIZON_DAYS),
                 "issued": True,
             }
         )
@@ -832,7 +1071,14 @@ def globe_view(root: Path | None = None) -> dict:
         end = (latest + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
         start = (latest - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
     quakes = map_quakes(root, start=start, end=end, minmag=6.0)
-    feat_row = _feature_row(latest, root) if latest is not None else None
+    feat_day = latest
+    if feat_day is None:
+        path = feature_dir(root) / "global_daily.parquet"
+        if path.exists():
+            stamp = parse_utc(pd.read_parquet(path, columns=["issue_time"])["issue_time"])
+            if not stamp.empty:
+                feat_day = stamp.max().floor("D")
+    feat_row = _feature_row(feat_day, root) if feat_day is not None else None
     feat_dict = None if feat_row is None else {k: _jsonable(v) for k, v in feat_row.to_dict().items()}
 
     return {
@@ -844,7 +1090,7 @@ def globe_view(root: Path | None = None) -> dict:
         "quake_range": {"start": start, "end": end},
         "watch": watch_list(feat_dict),
         "features": feat_dict,
-        "copy": leftover_week_copy(mainshock),
+        "copy": fresh_week_copy(mainshock),
         "foreshock": {
             "week": (load_foreshock(root) or {}).get("week") or [],
             "copy": foreshock_week_copy(load_foreshock(root)),
@@ -854,13 +1100,31 @@ def globe_view(root: Path | None = None) -> dict:
         },
         "last_week": {
             "week": ((mainshock or {}).get("last_week") or {}).get("week") or [],
-            "copy": leftover_week_copy((mainshock or {}).get("last_week"), mode="last_week")
+            "copy": fresh_week_copy((mainshock or {}).get("last_week"), mode="last_week")
             if (mainshock or {}).get("last_week")
             else None,
             "note": ((mainshock or {}).get("last_week") or {}).get("note"),
             "n_features": ((mainshock or {}).get("last_week") or {}).get("n_features"),
             "n_beats_climatology": ((mainshock or {}).get("last_week") or {}).get("n_beats_climatology"),
         },
+        "short_horizons": (mainshock or {}).get("short_horizons") or [],
+        "story": (mainshock or {}).get("story"),
+        "agreement_exam": (mainshock or {}).get("agreement_exam"),
+        "draft": (mainshock or {}).get("draft"),
+        "vote_draft": (mainshock or {}).get("vote_draft"),
+        "frozen_score": (mainshock or {}).get("frozen_score"),
+        "frozen": (mainshock or {}).get("frozen"),
+        "odd_box": (mainshock or {}).get("odd_box"),
+        "shrunk": (mainshock or {}).get("shrunk"),
+        "locked_thin": (mainshock or {}).get("locked_thin"),
+        "alpine_sequence": (mainshock or {}).get("alpine_sequence"),
+        "method_eval": (mainshock or {}).get("method_eval"),
+        "kermadec_attribution": (mainshock or {}).get("kermadec_attribution"),
+        "leftover": (mainshock or {}).get("leftover") or load_leftover(root),
+        "leftover_look": (mainshock or {}).get("leftover_look") or load_leftover_look(root),
+        "circus": (mainshock or {}).get("circus") or load_circus(root),
+        "experiments": (mainshock or {}).get("experiments") or [],
+        "evaluation": (mainshock or {}).get("evaluation"),
     }
 
 

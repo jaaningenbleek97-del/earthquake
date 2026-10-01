@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Monthly leftover climate indices from NOAA PSL. Replayable ASCII."""
+"""Monthly climate indices from NOAA PSL. Replayable ASCII."""
 
 from datetime import datetime, timedelta, timezone
 

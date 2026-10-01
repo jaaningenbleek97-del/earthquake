@@ -118,6 +118,12 @@
       "minimum": 0,
       "maximum": 1
     },
+    "competitor_climatology_p": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Train-era climatology (constant fresh-shock rate) shown beside issued p."
+    },
     "registry_id": {
       "type": "string",
       "minLength": 1,

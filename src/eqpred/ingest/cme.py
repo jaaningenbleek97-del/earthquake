@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """SOHO/LASCO CME onsets from the CDAW catalog.
 
-Halo / fast CMEs are the leftover solar-ejecta list Davidson watches.
+Halo / fast CMEs are the solar-ejecta list Davidson watches.
 """
 
 from datetime import datetime, timedelta, timezone

@@ -27,8 +27,9 @@ SKIP_STATIONS = ("AMS", "IPM")
 CHUNK_DAYS = 31
 FETCH_TIMEOUT = 120
 MAX_TRIES = 4
-# Hourly is enough for daily mean / range / max |dH|. Minute is 60× the bytes.
-SAMPLE = "Hour"
+# GIN rejects samplesPerDay=Hour. HAPI hourly ids are gone; minute HDZF is live.
+SAMPLE = "Minute"
+HAPI_CADENCE = "PT1M"
 
 
 def _is_fill(value: float) -> bool:
@@ -167,9 +168,9 @@ def _gin_data_url(station: str, start: datetime, duration: int) -> str:
 
 def _hapi_url(station: str, start: datetime, end: datetime) -> str:
     params = {
-        "id": f"{station}/best-avail/PT1H/hdzf",
-        "time.min": start.strftime("%Y-%m-%dT00:00:00Z"),
-        "time.max": end.strftime("%Y-%m-%dT00:00:00Z"),
+        "id": f"{station}/best-avail/{HAPI_CADENCE}/hdzf",
+        "time.min": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "time.max": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "format": "csv",
     }
     return f"{HAPI}?{urlencode(params)}"
@@ -214,6 +215,23 @@ def _fetch_station(station: str, start: datetime, end: datetime) -> pd.DataFrame
             return frame
     except Exception as exc:  # noqa: BLE001
         last_exc = exc
+        if "HTTP 400" in str(exc) and duration > 3:
+            parts: list[pd.DataFrame] = []
+            cursor = start
+            step = timedelta(days=3)
+            while cursor < end:
+                nxt = min(cursor + step, end)
+                try:
+                    part = _fetch_station(station, cursor, nxt)
+                except Exception as split_exc:  # noqa: BLE001
+                    print(f"  intermagnet.gin skip {station} {cursor.date()}: {split_exc}", flush=True)
+                    cursor = nxt
+                    continue
+                if not part.empty:
+                    parts.append(part)
+                cursor = nxt
+            if parts:
+                return pd.concat(parts, ignore_index=True)
         if _missing_http(exc):
             raise
         print(f"  intermagnet.gin {station} {start.date()} HAPI failed ({exc}); GIN {SAMPLE}", flush=True)
@@ -248,7 +266,7 @@ def pull_intermagnet(start: datetime, end: datetime, ingest_run_id: str) -> pd.D
     """Daily NZ/nearby ground magnetic variation from the public INTERMAGNET GIN."""
     frames: list[pd.DataFrame] = []
     cursor = utc_ts(start).to_pydatetime()
-    stop = utc_ts(end).to_pydatetime()
+    stop = min(utc_ts(end).to_pydatetime(), datetime.now(timezone.utc))
     while cursor < stop:
         nxt = min(cursor + timedelta(days=CHUNK_DAYS), stop)
         print(f"  intermagnet.gin {cursor.date()} -> {nxt.date()}", flush=True)

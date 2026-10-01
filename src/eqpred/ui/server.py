@@ -16,7 +16,10 @@ from eqpred.eval.brain import load_brain, run_brain
 from eqpred.eval.learn import run_learn
 from eqpred.eval.promote import load_promote
 from eqpred.eval.transfer import load_transfer, run_transfer
-from eqpred.eval.hunt import load_hunt, load_hunt_fresh
+from eqpred.eval.hunt import load_hunt, load_hunt_fresh, load_hunt_sequence
+from eqpred.eval.earth_state import load_earth_state, run_earth_state
+from eqpred.eval.circus import load_circus, run_circus
+from eqpred.eval.leftover import load_leftover, run_leftover
 from eqpred.ui.data import _trim_hunt, day_view, feature_series, globe_view, map_quakes, query_ledger, snapshot
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -40,11 +43,14 @@ class LabHandler(SimpleHTTPRequestHandler):
                     "ok": True,
                     "data_file": str(ui_data.__file__),
                     "has_hunt_fresh": "hunt_fresh" in snapshot.__code__.co_consts,
+                    "has_hunt_sequence": "hunt_sequence" in snapshot.__code__.co_consts,
                 }
             )
         if path == "/api/snapshot":
             return self._json(snapshot())
         if path == "/api/hunt":
+            if (query.get("sequence") or "") in {"1", "true", "yes"}:
+                return self._json(_trim_hunt(load_hunt_sequence(), keep_catalog=True))
             fresh = (query.get("fresh") or "1") not in {"0", "false", "no"}
             pack = load_hunt_fresh() if fresh else load_hunt()
             return self._json(_trim_hunt(pack))
@@ -120,6 +126,24 @@ class LabHandler(SimpleHTTPRequestHandler):
                     "transfer": load_transfer(),
                     "promote": load_promote(),
                     "note": brain.get("note") or "Run eqpred learn.",
+                }
+            )
+        if path == "/api/leftover":
+            if query.get("train") == "1":
+                return self._json(run_leftover())
+            return self._json(load_leftover() or {"writes_issued_p": False, "note": "Run eqpred leftover."})
+        if path == "/api/circus":
+            if query.get("train") == "1":
+                return self._json(run_circus())
+            return self._json(load_circus() or {"writes_issued_p": False, "note": "Run eqpred circus."})
+        if path == "/api/earth-state":
+            if query.get("train") == "1":
+                return self._json(run_earth_state())
+            return self._json(
+                load_earth_state()
+                or {
+                    "writes_issued_p": False,
+                    "note": "Run eqpred analog to fit the Earth-state tools.",
                 }
             )
         if path == "/":

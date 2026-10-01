@@ -112,6 +112,22 @@ def fusion_attrs(gains: dict[str, float]) -> list[dict]:
     return rows
 
 
+def fresh_attrs(connections: list[dict] | None) -> list[dict]:
+    """Top classifier connections on a fresh-shock card."""
+    rows: list[dict] = []
+    for item in connections or []:
+        driver = str(item.get("driver") or item.get("feature") or "")
+        if not driver:
+            continue
+        lag_days = item.get("lag_days")
+        hours = None if lag_days is None else int(lag_days) * 24
+        weight = item.get("importance")
+        rows.append(attr(driver, hours=hours, contribution=1.0 if weight is None else float(weight)))
+        if len(rows) >= 8:
+            break
+    return rows or [attr("fresh_mainshock")]
+
+
 def alarm_attrs(*names: str) -> list[dict]:
     return [attr(name, contribution=1.0) for name in names if name]
 

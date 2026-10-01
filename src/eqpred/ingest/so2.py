@@ -35,6 +35,17 @@ def _cds_client():
     return cdsapi.Client(url="https://ads.atmosphere.copernicus.eu/api")
 
 
+# EAC4 is a delayed reanalysis. Asking through "today" returns 400.
+ADS_LAG = timedelta(days=80)
+
+
+def eac4_end(end: datetime, now: datetime | None = None) -> datetime:
+    """Last day ADS will actually serve for EAC4."""
+    current = now or datetime.now(timezone.utc)
+    cap = current.replace(hour=0, minute=0, second=0, microsecond=0) - ADS_LAG
+    return min(end, cap)
+
+
 def _year_request(year: int, start: datetime, end: datetime) -> dict | None:
     """ADS EAC4 wants a date range, not year/month/day keys."""
     lo = max(start, datetime(year, 1, 1, tzinfo=timezone.utc))
@@ -98,8 +109,45 @@ def parse_so2_netcdf(path: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _month_request(year: int, month: int, start: datetime, end: datetime) -> dict | None:
+    lo = max(start, datetime(year, month, 1, tzinfo=timezone.utc))
+    if month == 12:
+        hi_exclusive = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        hi_exclusive = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    hi_exclusive = min(end, hi_exclusive)
+    if hi_exclusive <= lo:
+        return None
+    hi = hi_exclusive - timedelta(seconds=1)
+    return {
+        "variable": list(VARIABLES),
+        "date": [f"{lo:%Y-%m-%d}/{hi:%Y-%m-%d}"],
+        "time": ["00:00"],
+        "area": AREA,
+        "data_format": "netcdf",
+    }
+
+
+def _retrieve_so2(client, dest: Path, request: dict, label: str) -> pd.DataFrame | None:
+    print(f"  CAMS SO2 {label} {request['date'][0]}", flush=True)
+    try:
+        client.retrieve(DATASET, request, str(dest))
+    except Exception as exc:  # noqa: BLE001
+        print(f"  cams.so2 {label} skipped: {exc}", flush=True)
+        return None
+    try:
+        return parse_so2_netcdf(_netcdf_path(dest))
+    except Exception as exc:  # noqa: BLE001
+        print(f"  cams.so2 parse {label} failed: {exc}", flush=True)
+        return None
+
+
 def pull_so2(start: datetime, end: datetime, ingest_run_id: str) -> pd.DataFrame:
     """CAMS SO2 over Kermadec. Skip if CDS is not configured."""
+    end = eac4_end(end)
+    if end <= start:
+        print("  cams.so2 skipped (inside EAC4 lag)", flush=True)
+        return pd.DataFrame()
     try:
         client = _cds_client()
     except Exception as exc:  # noqa: BLE001
@@ -117,18 +165,23 @@ def pull_so2(start: datetime, end: datetime, ingest_run_id: str) -> pd.DataFrame
             if request is None:
                 continue
             dest = tmp_path / f"so2_{year}.nc"
-            print(f"  CAMS SO2 {year} {request['date'][0]}", flush=True)
-            try:
-                client.retrieve(DATASET, request, str(dest))
-            except Exception as exc:  # noqa: BLE001
-                print(f"  cams.so2 {year} skipped: {exc}", flush=True)
-                if "404" in str(exc) or "403" in str(exc) or "not found" in str(exc).lower() or "policies" in str(exc).lower():
-                    break
+            part = _retrieve_so2(client, dest, request, str(year))
+            if part is not None and not part.empty:
+                frames.append(part)
                 continue
-            try:
-                frames.append(parse_so2_netcdf(_netcdf_path(dest)))
-            except Exception as exc:  # noqa: BLE001
-                print(f"  cams.so2 parse {year} failed: {exc}", flush=True)
+            year_published = False
+            for month in range(1, 13):
+                month_req = _month_request(year, month, start, end)
+                if month_req is None:
+                    continue
+                month_dest = tmp_path / f"so2_{year}{month:02d}.nc"
+                month_part = _retrieve_so2(client, month_dest, month_req, f"{year}-{month:02d}")
+                if month_part is not None and not month_part.empty:
+                    frames.append(month_part)
+                    year_published = True
+                elif not year_published and month_part is None:
+                    print(f"  cams.so2 {year} not on ADS yet", flush=True)
+                    break
     if not frames:
         return pd.DataFrame()
     raw = pd.concat(frames, ignore_index=True)

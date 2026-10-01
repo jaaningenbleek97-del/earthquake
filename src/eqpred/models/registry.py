@@ -53,6 +53,11 @@ CODE_RELATIVE = (
     "models/quiet.py",
     "models/modulator.py",
     "models/attribution.py",
+    "eval/mainshock.py",
+    "eval/honest.py",
+    "eval/decluster.py",
+    "eval/csep.py",
+    "features/fresh.py",
     "catalog.py",
     "regions.py",
     "records.py",
@@ -207,11 +212,8 @@ def register_current(root: Path | None = None) -> dict[str, Any]:
         "feature_recipe": recipe,
         "files": [name for name in MODEL_FILES if name in brain],
         "model_ids": [
-            "fusion.etas_x_mod.v1",
+            "fresh.mainshock.v1",
             "alarm.spf.v2",
-            "alarm.quiet.v1",
-            "alarm.quiet_spf.v1",
-            "anti.quiet.v1",
         ],
     }
     _write_snapshot(entry_id, brain, root)

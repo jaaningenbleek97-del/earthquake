@@ -34,7 +34,7 @@ REGIONS = {
         "min_lat": -37.0,
         "max_lat": -25.5,
     },
-    # Transfer boxes. Same 7-day question, not issued live cards.
+    # Transfer boxes. Same horizon question, not issued live cards.
     "japan": {
         "kind": "bbox",
         "name": "japan_trench",

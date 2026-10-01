@@ -1,8 +1,9 @@
 """Look at every source at once, then learn from closed weeks.
 
-Hunt tests one knob. This residual tree sees them together — including
-combinations — and scores mornings whose next 7 days are already in the
-catalog. A journal remembers what failed so the next run can improve.
+Hunt tests one knob. This tree sees every source together — including
+combinations — then residualizes against the rolling 5-year rate. A last-
+two-week tree, an M8 track, and a quiet-start track sit beside the wide
+all-lag tree. A journal remembers what failed so the next run can improve.
 Nothing here writes issued p.
 """
 
@@ -19,18 +20,43 @@ from sklearn.ensemble import GradientBoostingRegressor
 
 from eqpred.catalog import load_comcat, load_comcat_versions
 from eqpred.eval.backtest import _STORE, _key, paper_trade, paper_trade_combo
+from eqpred.eval.horizon import HORIZON_DAYS
+from eqpred.eval.honest import (
+    HONEST_LAGS,
+    purged_train_hold,
+    quiet_start_mask,
+    rolling_climate_series,
+)
 from eqpred.eval.hunt import SKIP_COLS, SKIP_DRIVER_EXACT, TARGETS, _etas_p, driver_family
-from eqpred.eval.strategies import _window_hits as _hits
+from eqpred.eval.decluster import fresh_hits as _hits
 from eqpred.models.quiet import QUIET_QUANTILE
 from eqpred.paths import data_dir, feature_dir
 from eqpred.records import iso
 from eqpred.regions import REGIONS
 from eqpred.stamp import parse_utc, utc_ts
 
-SPECIALIST_FAMILIES = ("solar", "wave2", "geometry", "mass", "volcano", "cosmic", "earth", "dust", "climate")
+SPECIALIST_FAMILIES = (
+    "solar",
+    "wave2",
+    "geometry",
+    "mass",
+    "volcano",
+    "cosmic",
+    "earth",
+    "dust",
+    "climate",
+    "fresh_catalog",
+    "slowslip",
+    "analog",
+    "graph",
+    "combo",
+    "spf",
+    "radio",
+)
 
-HORIZON_DAYS = 7
 BRAIN_LAGS = (0, 7, 14, 27, 30, 54, 81, 90, 180)
+BRAIN_LAGS_RECENT = HONEST_LAGS
+RARE_TARGETS = (("global", 8.0),)
 SHARE = 0.2
 MIN_TRAIN = 80
 MIN_SCORE = 40
@@ -46,6 +72,7 @@ _TREE = dict(
     learning_rate=0.06,
     subsample=0.75,
     min_samples_leaf=20,
+    max_features="sqrt",
     random_state=7,
 )
 
@@ -95,6 +122,8 @@ def _driver_columns(features: pd.DataFrame, *, unconventional_only: bool) -> lis
             continue
         if not pd.api.types.is_numeric_dtype(features[col]):
             continue
+        if driver_family(col) == "foil":
+            continue
         if unconventional_only and driver_family(col) == "catalog":
             continue
         out.append(str(col))
@@ -134,17 +163,12 @@ def _design(feat: pd.DataFrame, columns: list[str], lags: tuple[int, ...] = BRAI
 def _impute(train_x: np.ndarray, all_x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     if train_x.size == 0:
         return train_x, all_x
-    med = np.nanmedian(train_x, axis=0)
+    finite_any = np.isfinite(train_x).any(axis=0)
+    med = np.zeros(train_x.shape[1], dtype=float)
+    if finite_any.any():
+        med[finite_any] = np.nanmedian(train_x[:, finite_any], axis=0)
     med = np.where(np.isfinite(med), med, 0.0)
-
-    def fill(mat: np.ndarray) -> np.ndarray:
-        out = np.array(mat, dtype=float, copy=True)
-        for j in range(out.shape[1]):
-            bad = ~np.isfinite(out[:, j])
-            out[bad, j] = med[j]
-        return out
-
-    return fill(train_x), fill(all_x)
+    return np.where(np.isfinite(train_x), train_x, med), np.where(np.isfinite(all_x), all_x, med)
 
 
 def _brier(prob: np.ndarray, hits: np.ndarray) -> float | None:
@@ -154,13 +178,21 @@ def _brier(prob: np.ndarray, hits: np.ndarray) -> float | None:
     return float(np.mean((prob[ok] - hits[ok]) ** 2))
 
 
-def _alarm(score: np.ndarray, hits: np.ndarray, days: pd.DatetimeIndex, train_mask: np.ndarray, hold_mask: np.ndarray) -> dict[str, Any]:
+def _alarm(
+    score: np.ndarray,
+    hits: np.ndarray,
+    days: pd.DatetimeIndex,
+    train_mask: np.ndarray,
+    hold_mask: np.ndarray,
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     train = score[train_mask]
     finite = train[np.isfinite(train)]
     if finite.size < MIN_TRAIN:
         return {"n_trades": 0, "hit_rate": None, "base_rate": None, "lift": None, "time_in_alarm": 0.0, "threshold": None, "recent": []}
     threshold = float(np.nanquantile(finite, 1.0 - SHARE))
-    entered = np.isfinite(score) & (score >= threshold)
+    entered = np.isfinite(score) & (score > threshold if strict else score >= threshold)
     hold_hits = hits[hold_mask]
     hold_in = entered[hold_mask]
     n_days = int(hold_mask.sum())
@@ -192,6 +224,14 @@ def _alarm(score: np.ndarray, hits: np.ndarray, days: pd.DatetimeIndex, train_ma
     }
 
 
+def _ready_climate(hits: np.ndarray, days: pd.DatetimeIndex, train_mask: np.ndarray) -> np.ndarray:
+    climate = rolling_climate_series(np.asarray(hits, dtype=float), days)
+    fill = float(np.nanmean(np.asarray(hits, dtype=float)[np.asarray(train_mask, dtype=bool)]))
+    if not np.isfinite(fill):
+        fill = 0.0
+    return np.where(np.isfinite(climate), climate, fill)
+
+
 def _fit_tree(x_train: np.ndarray, y_train: np.ndarray) -> GradientBoostingRegressor | None:
     if x_train.shape[0] < MIN_TRAIN or x_train.shape[1] < 1:
         return None
@@ -221,13 +261,14 @@ def _region_fit(
     if raw_x.shape[1] == 0:
         return None
     x_train, x_all = _impute(raw_x[train_mask], raw_x)
-    residual = hits.astype(float) - etas
+    climate = _ready_climate(hits, days, train_mask)
+    residual = hits.astype(float) - climate
     model = _fit_tree(x_train, residual[train_mask])
     if model is None:
         return None
     pred = model.predict(x_all)
-    p_hat = np.clip(etas + pred, 1e-6, 1 - 1e-6)
-    alarm = _alarm(pred, hits, days, train_mask, score_mask)
+    p_hat = np.clip(climate + pred, 1e-6, 1 - 1e-6)
+    alarm = _alarm(pred, hits, days, train_mask, score_mask, strict=True)
     ranked = sorted(
         (
             {
@@ -243,15 +284,21 @@ def _region_fit(
         reverse=True,
     )
     hold_hits = hits[score_mask].astype(float)
+    climate_brier = _brier(climate[score_mask], hold_hits)
+    model_brier = _brier(p_hat[score_mask], hold_hits)
     return {
         "region": region_id,
         "region_label": REGIONS[region_id].get("label") or region_id,
         "magnitude_min": mag,
         "n_train": int(train_mask.sum()),
         "n_score": int(score_mask.sum()),
-        "brier": _brier(p_hat[score_mask], hold_hits),
+        "brier": model_brier,
         "etas_brier": _brier(etas[score_mask], hold_hits),
-        "climatology_brier": _brier(np.full(int(score_mask.sum()), float(hits[train_mask].mean())), hold_hits),
+        "climatology_brier": climate_brier,
+        "climate_brier": climate_brier,
+        "beats_climate": bool(
+            model_brier is not None and climate_brier is not None and model_brier < climate_brier
+        ),
         **alarm,
         "connections": [row for row in ranked if row["importance"] > 0][:12],
     }
@@ -358,7 +405,9 @@ def _english(report: dict[str, Any]) -> str:
     top = (report.get("connections") or [])[:3]
     names = ", ".join(f"{c['driver']} ({c['family']})" for c in top) if top else "nothing loud"
     bits = [
-        f"The learner looked at {n_feat} series at once (every unconventional source, lags 0/7/30 days), not one knob at a time."
+        f"The learner looked at {n_feat} series at once "
+        f"(every non-catalog source, lags {'/'.join(str(l) for l in BRAIN_LAGS)} days), "
+        "then fit the leftover after the rolling 5-year rate, not one knob at a time."
     ]
     if best is None:
         bits.append("It did not get a usable score on later closed weeks.")
@@ -371,22 +420,26 @@ def _english(report: dict[str, Any]) -> str:
         )
     brier = report.get("locked_brier")
     etas_brier = report.get("locked_etas_brier")
+    climate_brier = report.get("locked_climate_brier")
+    if brier is not None and climate_brier is not None:
+        vs_c = "better than" if brier < climate_brier else "worse than" if brier > climate_brier else "even with"
+        bits.append(f"Chance error is {vs_c} the rolling 5-year rate.")
     if brier is not None and etas_brier is not None and brier > etas_brier:
         bits.append("Its raw chance number is still worse than ETAS. A small alarm lift is not a better probability.")
     if catalog_best and best and catalog_best.get("lift") is not None and best.get("lift") is not None:
         gap = catalog_best["lift"] - best["lift"]
         if gap > 0.005:
             bits.append(
-                "A twin that was allowed recent-quake counts did better. That extra is leftover aftershocks, not a new driver."
+                "A twin that was allowed recent-quake counts did better. That extra is aftershock echo, not a new driver."
             )
         else:
-            bits.append("Letting it see recent-quake counts did not help. The leftover is not just aftershocks.")
+            bits.append("Letting it see recent-quake counts did not help. The signal is not just aftershocks.")
     if wf.get("mean_lift") is not None:
         bits.append(
             f"Walk-forward (train, then score the next years, repeat as weeks closed) mean lift {wf['mean_lift'] * 100:+.1f} pt across {wf.get('n_folds') or 0} folds."
         )
     if improved is True:
-        bits.append("This run beat the last journal entry on leftover error. It is learning.")
+        bits.append("This run beat the last journal entry on model error. It is learning.")
     elif improved is False:
         bits.append("This run did not beat the last journal entry. Memory still drops knobs that failed twice.")
     else:
@@ -396,10 +449,23 @@ def _english(report: dict[str, Any]) -> str:
         bits.append(
             f"Quiet-only tree (ETAS in the boring tail): lift {quiet['locked_lift'] * 100:+.1f} pt."
         )
+    quiet_start = report.get("quiet_start") or {}
+    if quiet_start.get("locked_lift") is not None:
+        bits.append(
+            f"Quiet-start tree (no large shock in the last 10 days): lift {quiet_start['locked_lift'] * 100:+.1f} pt."
+        )
+    recent = report.get("recent") or {}
+    if recent.get("n_features"):
+        bits.append(
+            f"Last-two-week tree still sees every source ({recent['n_features']} series)."
+        )
+    rare = report.get("rare") or {}
+    if rare.get("regions"):
+        bits.append("An M8 track is scored separately. It does not write issued p.")
     mixer = report.get("mixer") or {}
     if mixer.get("brier") is not None and mixer.get("etas_brier") is not None:
         vs = "better than" if mixer["brier"] < mixer["etas_brier"] else "worse than"
-        bits.append(f"Specialist mixer leftover error is {vs} ETAS.")
+        bits.append(f"Specialist mixer error is {vs} ETAS.")
     bits.append(f"What it leaned on: {names}. Official issued p is unchanged.")
     return " ".join(bits)
 
@@ -445,10 +511,7 @@ def run_brain(
     days = pd.DatetimeIndex(feat["issue_time"])
     catalog_end = catalog["observed_at"].max()
     closed = days + pd.Timedelta(days=HORIZON_DAYS) <= catalog_end
-    train_cut = utc_ts(train_end)
-    hold_cut = utc_ts(holdout_start)
-    train_mask = closed & (days <= train_cut)
-    hold_mask = closed & (days >= hold_cut)
+    train_mask, hold_mask = purged_train_hold(days, closed, train_end, holdout_start)
 
     unconv = _driver_columns(feat, unconventional_only=True)
     all_cols = _driver_columns(feat, unconventional_only=False)
@@ -495,7 +558,13 @@ def run_brain(
             raw_x_names=all_x,
         )
         if twin:
-            catalog_twin.append({k: twin[k] for k in ("region", "region_label", "lift", "brier", "etas_brier") if k in twin})
+            catalog_twin.append(
+                {
+                    k: twin[k]
+                    for k in ("region", "region_label", "lift", "brier", "etas_brier", "climate_brier", "beats_climate")
+                    if k in twin
+                }
+            )
 
     quiet_regions: list[dict[str, Any]] = []
     quiet_cut = None
@@ -517,6 +586,60 @@ def run_brain(
         )
         if locked:
             quiet_regions.append({k: v for k, v in locked.items() if k != "connections"})
+
+    recent_x = _design(feat, unconv, lags=BRAIN_LAGS_RECENT)
+    recent_regions: list[dict[str, Any]] = []
+    for region_id, mag in TARGETS:
+        hits, etas = target_cache[(region_id, mag)]
+        row = _region_fit(
+            feat=feat,
+            columns=unconv,
+            region_id=region_id,
+            mag=mag,
+            train_mask=train_mask,
+            score_mask=hold_mask,
+            hits=hits,
+            etas=etas,
+            raw_x_names=recent_x,
+        )
+        if row:
+            recent_regions.append({k: v for k, v in row.items() if k != "connections"})
+
+    quiet_start_regions: list[dict[str, Any]] = []
+    for region_id, mag in TARGETS:
+        hits, etas = target_cache[(region_id, mag)]
+        qstart = quiet_start_mask(catalog, REGIONS[region_id], mag, days)
+        row = _region_fit(
+            feat=feat,
+            columns=unconv,
+            region_id=region_id,
+            mag=mag,
+            train_mask=train_mask & qstart,
+            score_mask=hold_mask & qstart,
+            hits=hits,
+            etas=etas,
+            raw_x_names=unconv_x,
+        )
+        if row:
+            quiet_start_regions.append({k: v for k, v in row.items() if k != "connections"})
+
+    rare_regions: list[dict[str, Any]] = []
+    for region_id, mag in RARE_TARGETS:
+        rare_hits = _hits(catalog, REGIONS[region_id], mag, days, HORIZON_DAYS)
+        rare_etas = _etas_p(catalog, days, region_id, mag, root, versions=versions)
+        row = _region_fit(
+            feat=feat,
+            columns=unconv,
+            region_id=region_id,
+            mag=mag,
+            train_mask=train_mask,
+            score_mask=hold_mask,
+            hits=rare_hits,
+            etas=rare_etas,
+            raw_x_names=unconv_x,
+        )
+        if row:
+            rare_regions.append({k: v for k, v in row.items() if k != "connections"})
 
     specialists: list[dict[str, Any]] = []
     mixer_pred = None
@@ -554,11 +677,11 @@ def run_brain(
             )
             raw_x, _names = fam_x
             x_train, x_all = _impute(raw_x[train_mask], raw_x)
-            residual = g_hits.astype(float) - g_etas
-            model = _fit_tree(x_train, residual[train_mask])
+            g_climate = _ready_climate(g_hits, days, train_mask)
+            model = _fit_tree(x_train, (g_hits.astype(float) - g_climate)[train_mask])
             if model is None:
                 continue
-            mix_parts.append(np.clip(g_etas + model.predict(x_all), 1e-6, 1 - 1e-6))
+            mix_parts.append(np.clip(g_climate + model.predict(x_all), 1e-6, 1 - 1e-6))
         if mix_parts:
             mixer_pred = np.mean(np.column_stack(mix_parts), axis=1)
             mixer_n = len(mix_parts)
@@ -609,21 +732,25 @@ def run_brain(
     )
     locked_brier = _mean([r.get("brier") for r in regions])
     locked_etas = _mean([r.get("etas_brier") for r in regions])
+    locked_climate = _mean([r.get("climate_brier") for r in regions])
     locked_lift = _mean([r.get("lift") for r in regions])
     prev = journal[-1] if journal else None
     improved = None
     if prev and locked_brier is not None and prev.get("locked_brier") is not None:
         improved = locked_brier < float(prev["locked_brier"]) - 1e-4
 
-    mixer = {"n_specialists": mixer_n, "brier": None, "etas_brier": None}
+    mixer = {"n_specialists": mixer_n, "brier": None, "etas_brier": None, "climate_brier": None}
     if mixer_pred is not None and global_pair is not None:
         g_hits, g_etas = target_cache[global_pair]
         hold_y = g_hits[hold_mask].astype(float)
+        g_climate = _ready_climate(g_hits, days, train_mask)
         mixer["brier"] = _brier(mixer_pred[hold_mask], hold_y)
         mixer["etas_brier"] = _brier(g_etas[hold_mask], hold_y)
+        mixer["climate_brier"] = _brier(g_climate[hold_mask], hold_y)
 
     report = {
         "writes_issued_p": False,
+        "looks_at_all_sources": True,
         "train_end": train_end,
         "holdout_start": holdout_start,
         "n_features": int(unconv_x[0].shape[1]),
@@ -632,15 +759,43 @@ def run_brain(
         "catalog_end": catalog_end.date().isoformat() if hasattr(catalog_end, "date") else str(catalog_end),
         "locked_brier": locked_brier,
         "locked_etas_brier": locked_etas,
+        "locked_climate_brier": locked_climate,
+        "locked_beats_climate": bool(
+            locked_brier is not None and locked_climate is not None and locked_brier < locked_climate
+        ),
         "locked_lift": locked_lift,
         "improved": improved,
+        "recent": {
+            "lags_days": list(BRAIN_LAGS_RECENT),
+            "n_features": int(recent_x[0].shape[1]),
+            "looks_at_all_sources": True,
+            "locked_lift": _mean([r.get("lift") for r in recent_regions]),
+            "locked_brier": _mean([r.get("brier") for r in recent_regions]),
+            "locked_climate_brier": _mean([r.get("climate_brier") for r in recent_regions]),
+            "regions": recent_regions,
+        },
         "quiet": {
             "quantile": QUIET_QUANTILE,
             "etas_p_cut": quiet_cut,
             "locked_lift": _mean([r.get("lift") for r in quiet_regions]),
             "locked_brier": _mean([r.get("brier") for r in quiet_regions]),
             "locked_etas_brier": _mean([r.get("etas_brier") for r in quiet_regions]),
+            "locked_climate_brier": _mean([r.get("climate_brier") for r in quiet_regions]),
             "regions": quiet_regions,
+        },
+        "quiet_start": {
+            "lookback_days": 10,
+            "locked_lift": _mean([r.get("lift") for r in quiet_start_regions]),
+            "locked_brier": _mean([r.get("brier") for r in quiet_start_regions]),
+            "locked_climate_brier": _mean([r.get("climate_brier") for r in quiet_start_regions]),
+            "regions": quiet_start_regions,
+        },
+        "rare": {
+            "targets": [{"region": rid, "magnitude_min": mag} for rid, mag in RARE_TARGETS],
+            "locked_lift": _mean([r.get("lift") for r in rare_regions]),
+            "locked_brier": _mean([r.get("brier") for r in rare_regions]),
+            "locked_climate_brier": _mean([r.get("climate_brier") for r in rare_regions]),
+            "regions": rare_regions,
         },
         "specialists": specialists,
         "mixer": mixer,

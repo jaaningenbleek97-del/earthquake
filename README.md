@@ -26,7 +26,7 @@ Briefing canvas (open beside chat):
 ## Product rules
 
 1. **Issue predictions.** Every run writes records with time window, region, magnitude floor, and a probability or alarm. Vague “elevated risk” with no box is not a prediction.
-2. **Unconventional drivers are first-class.** Solar, magnetic, tidal, lunar, and ionospheric series are not an optional appendix. They still have to beat ETAS on a later window. Issued global *p* is calibrated ETAS until *g* shows timing skill; solar stays on the quiet specialist and on the abandoned-recipe nulls. Raw ETAS is the skeptic.
+2. **Fresh shock is the product.** Issued *p* is the kitchen-sink classifier on every timestamped non-catalog source, aimed at a declustered first shock. Catalog counts, energy, days-since, and ETAS λ stay out of that model. Climatology sits beside the number. Aftershock ETAS is a foil, not the issued card. SPF solar alarms can still fire as a second head.
 3. **No future leakage.** Features have `observed_at` and `available_at`. A prediction issued at `T` may only see data available at `T`. ETAS λ uses the same rule: ComCat events enter the history after a magnitude-dependent first-report delay. Hits still use the final bulletin. We do not have snapshot history, so magnitude revisions are not replayed.
 4. **Hunt, then learn.** Scan sources and lags for correlations. Issue calls. When a window closes, update rates and refit. The model is allowed to change as new data arrives.
 5. **Keep score.** Hit rate, time-in-alarm, and vs ETAS on later windows. If we are just rediscovering aftershocks, the scoreboard says so.
@@ -74,14 +74,14 @@ What that writes:
 | `data/raw/{source}/{run}.parquet` | Wave 1: ComCat, OMNI, Wilcox, SILSO, geometry, SWPC. Wave 2: GeoNet, NGL GNSS (site stack), IGS TEC (per-box), ERA5, INTERMAGNET stations. Wave 3: Japan/Chile FDSN, GOES protons, GRACE, CAMS SO2. ComCat `available_at` is origin + first-report delay. |
 | `data/features/global_daily.parquet` | Point-in-time daily stack (`available_at <= issue_time`) |
 | `data/models/etas.json`, `modulator.json`, `quiet.json`, `gr.json`, `calibration.json`, `budget.json`, `migration.json` | Temporal ETAS, unused-on-issue solar g, quiet λ cut, locked GR b, issued scale per region (calibrated ETAS; λ is M≥4.5), monthly alarm caps, box migration residual |
-| `data/predictions/batch-*.json` | Fusion global M≥7; Hikurangi / Alpine M≥5; Kermadec M≥6; SPF M8; quiet-regime M7 and M8; anti-prediction (box stays quiet) |
-| `data/eval/battery.json` | Davidson v1 vs v2, quiet SPF, Marchitelli, Love–Thomas, issued calibrated ETAS vs abandoned g / time-shift / ETAS-world / climatology |
+| `data/predictions/batch-*.json` | Fresh-shock `fresh.mainshock.v1` global M≥7; Hikurangi / Alpine M≥5; Kermadec M≥6; SPF M8. Old ETAS / quiet / anti batches stay on disk as history. |
+| `data/eval/battery.json` | Davidson v1 vs v2, quiet SPF, Marchitelli, Love–Thomas, ETAS foil vs abandoned g / time-shift / ETAS-world / climatology |
 | `data/eval/strategies.json` | Walk-forward condition → box backtests (paper trades vs always-in base rate) |
 | `data/eval/hunt.json` | Every feature column × lag × box vs next-week hits; train FDR then holdout confirm |
 | `data/eval/backtest.json` | Paper trades on closed holdout weeks — no waiting for a live forecast |
 | `data/eval/brain.json` | Residual tree on every unconventional source at once; journal under `data/eval/brain/` |
 | `data/eval/transfer.json` | Japan ↔ Chile residual transfer; not issued *p* |
-| `data/eval/promote.json` | Gate: walk-forward lift and leftover error vs ETAS. Never writes issued models. |
+| `data/eval/promote.json` | Score chip: walk-forward lift and fresh-shock error vs ETAS. Does not lock or rewrite issued p. |
 | `data/predictions/ledger.parquet` | Binary hits vs ComCat, plus a learning-only near-miss grade |
 
 SWPC JSON is a short operational feed (GOES X-ray / live Kp). The long replay for wind, IMF, Kp, F10.7 is OMNI. Wilcox Polar.html is ingested in full, then the Significant Window is delayed 40 days so we do not alarm on a peak that had not been posted.

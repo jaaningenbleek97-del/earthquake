@@ -77,9 +77,9 @@ def fit_all(train_end: str = "2018-12-31", root: Path | None = None):
     save_models(etas, mod, root)
     save_quiet(threshold, root=root)
     scale = 1.0
-    for horizon in (1, 7, 90):
+    for horizon in (1, 7, 30, 90):
         fitted = fit_issued_scale(train_end=train_end, horizon_days=horizon, root=root)
-        if horizon == 7:
+        if horizon == 30:
             scale = fitted
     fit_issued_nowcast(train_end=train_end, root=root)
     fit_issued_coulomb(train_end=train_end, root=root)

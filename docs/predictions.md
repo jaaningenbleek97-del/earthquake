@@ -31,15 +31,15 @@ Required fields:
 | `drivers` | Structured list: `driver`, `lag_hours`, `contribution`. Fusion contribution is `ln(gain)`. Alarm contribution is 1 for a gate that fired, or tail-depth for anti-prediction. Only terms that entered the call. |
 | `horizon_days` | Convenience copy of the window length. |
 
-Optional: `rationale` (human text), `competitor_etas_p` (what ETAS said for the same box — so we can see if we are just echoing aftershocks).
+Optional: `rationale` (human text), `competitor_climatology_p` (train-era fresh-shock rate shown beside issued p), `competitor_etas_p` (historical aftershock foil on old ETAS cards only).
 
-## Three prediction heads
+## Issued heads
 
-These are the things we are trying to make work. Catalog-only models sit beside them as competition, not as the roadmap.
+The product is a **fresh-shock** call. Catalog-only models sit beside it as competition, not as the roadmap.
 
-1. **Fusion predictor** — neural (TFT / Transformer) on catalog history **plus** solar, solar wind, Kp/Dst, SPF, tides, lunar geometry, later TEC. Outputs a probability map for 1d and 7d, then 90d.
-2. **Solar-magnetic alarm** — Davidson-style SPF windows, Cataldi/Marchitelli proton-density spikes, storm indices, cycle phase (Burns). Outputs a hard alarm for M≥6 globally and M8+ as a rare separate card.
-3. **Geometry alarm** — tides + lunar distance/declination + optional planetary longitudes. Cheap to compute. The question is whether it moves the needle on already-loaded faults.
+1. **Fresh-shock classifier** (`fresh.mainshock.v1`) — every timestamped non-catalog source we can replay (space weather, tides, ionosphere, GPS, and the rest). Target is a declustered first shock. Catalog counts and ETAS λ stay out. Issued `value` is that model's p. Climatology sits in `competitor_climatology_p`.
+2. **Solar-magnetic alarm** — Davidson-style SPF windows. A second head, not aftershock physics. Outputs a rare M8+ alarm.
+3. **Aftershock ETAS** — lab foil only. Old `fusion.etas_x_mod.v1` batches stay on disk. New predict runs do not write ETAS, quiet-ETAS, or anti cards.
 
 A daily job writes a batch of prediction records. A later scorer matches ComCat events into those boxes and updates a ledger.
 
@@ -54,9 +54,10 @@ A daily job writes a batch of prediction records. A later scorer matches ComCat 
 - **Near-miss** (learning only) — a graded score in `[0, 1]` for an event that was close: inside 150 km of the box, 48 hours of the window, and 0.5 magnitude of the floor. A M5.9 one cell over, 8 hours late is not a total miss. Geometric mean of space / time / magnitude credits. Never replaces binary hit.
 - **Time-in-alarm** — fraction of issue-days the alarm head was on. A head that is on 40% of days must beat that base rate.
 - **Alert budget** — each alarm head may spend at most N days per region per calendar month (SPF 6, quiet specialists 2, anti-prediction 4). Caps are locked constants, same philosophy as the 20% train-era SPF cutoff. Spent in date order, which is what a live issuer can do. A long SPF blob uses the month on its first days. Probability cards are not budgeted.
-- **Anti-prediction** — “this box stays quiet for 7 days.” Issued when fusion *p* is at or below the train-era 15th percentile for that box. Hit = no qualifying quake. Score against always-quiet (1 − fusion hit rate). Do not treat a 98% Alpine quiet rate as skill if the head is on every day.
-- **Vs ETAS** — same boxes, same days. If our p is just ETAS with extra noise, we failed.
-- **Attribution** — every card lists the terms that entered the number. Fusion rows are log-rate contributions plus the lag the feature was built at. Solar flags that did not multiply issued *p* are not listed. Alarm rows name the gates that spent the budget.
+- **Anti-prediction** — historical “this box stays quiet” cards on the old ETAS ledger. New predict runs do not issue them.
+- **Vs climatology** — same boxes, same days. If issued p is just the train-era rate, the scoreboard says so.
+- **Vs ETAS** — lab foil. If we only rediscovered aftershocks, the foil says so.
+- **Attribution** — every card lists the terms that entered the number. Fresh-shock rows name the classifier connections. Alarm rows name the gates that spent the budget.
 - **Migration** — a cluster visible that morning, projected onto the locked fault plane. Along-strike and up-dip km/day are diagnostics. One of them may multiply box *p* only if it beat the current issued baseline on train. Events deeper than 70 km are dropped.
 - **Rare events** — M8+ cards are scored separately. Small n. Still issue them. Do not pretend 3 hits prove a theory.
 

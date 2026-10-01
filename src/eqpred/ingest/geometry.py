@@ -61,6 +61,9 @@ def pull_geometry(start: datetime, end: datetime, ingest_run_id: str) -> pd.Data
     stop = end.astimezone(timezone.utc)
     while day < stop:
         phase, dist, decl = _lunar_state(day)
+        to_new = min(phase, 360.0 - phase)
+        to_full = abs(phase - 180.0)
+        near_node = abs(decl) < 1.8
         rows.append(
             {
                 "source": "computed.geometry",
@@ -72,7 +75,9 @@ def pull_geometry(start: datetime, end: datetime, ingest_run_id: str) -> pd.Data
                 "lunar_distance_re": dist,
                 "lunar_declination_deg": decl,
                 "tidal_strain": _tidal_proxy(dist, phase),
-                "near_new_or_full": float(min(phase, abs(phase - 180), 360 - phase) < 20),
+                "near_new_or_full": float(min(to_new, to_full) < 20),
+                "solar_eclipse_window": float(to_new < 18.0 and near_node),
+                "lunar_eclipse_geom": float(to_full < 18.0 and near_node),
             }
         )
         day += timedelta(days=1)

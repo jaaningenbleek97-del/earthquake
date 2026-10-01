@@ -10,6 +10,7 @@ from eqpred.models.attribution import (
     anti_attrs,
     ensure_attrs,
     flatten_driver_field,
+    fresh_attrs,
     fusion_attrs,
     lag_hours,
     log_contrib,
@@ -81,11 +82,41 @@ def test_prediction_record_is_structured():
     assert rec["drivers"][0]["lag_hours"] == 960
 
 
+def test_fresh_attrs_use_lag_days():
+    rows = fresh_attrs(
+        [{"driver": "proton_density_cm3", "lag_days": 2, "importance": 0.5}]
+    )
+    assert rows[0]["driver"] == "proton_density_cm3"
+    assert rows[0]["lag_hours"] == 48
+    assert rows[0]["contribution"] == pytest.approx(0.5)
+    assert fresh_attrs([])[0]["driver"] == "fresh_mainshock"
+
+
+def test_prediction_can_carry_climatology():
+    rec = prediction(
+        prediction_id="y",
+        issued_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        valid_from=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        valid_to=datetime(2020, 1, 8, tzinfo=timezone.utc),
+        horizon_days=7,
+        region={"kind": "named", "name": "global"},
+        magnitude_min=7.0,
+        kind="probability",
+        value=0.09,
+        model_id="fresh.mainshock.v1",
+        drivers=["proton_density_cm3"],
+        competitor_climatology_p=0.04,
+    )
+    assert rec["competitor_climatology_p"] == pytest.approx(0.04)
+    assert "competitor_etas_p" not in rec
+
+
 def test_schema_allows_region_label():
     schema = json.loads((Path(repo_root()) / "schemas" / "prediction.schema.json").read_text(encoding="utf-8"))
     assert "label" in schema["properties"]["region"]["properties"]
     assert "registry_id" in schema["properties"]
     assert "code_hash" in schema["properties"]
+    assert "competitor_climatology_p" in schema["properties"]
 
 
 def test_flatten_accepts_objects_or_strings():

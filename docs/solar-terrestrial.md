@@ -24,8 +24,42 @@ Geologist / geophysicist by training; the earthquake work is public commentary, 
 
 - Story: the planet loads through solar maximum; descending phase and minimum get noisier (quakes, volcanoes). Flares, storms, eclipses, sometimes planetary geometry.
 - We do not need a paper to test a cycle-phase feature.
-- Features: `solar_cycle_phase`, `days_since_solar_max`, `f107_trend_90d`, plus geometry flags from skyfield (lunar, optional planetary aspects).
-- Live use: those columns go into fusion and the geometry alarm. Eclipses are computable; include them as a binary if we want that Burns-style card.
+- Features: `solar_cycle_phase`, `solar_days_since_max`, `solar_descending`, `f107_trend_90d`, `solar_eclipse_window`, `volcano_unrest`, plus geometry flags (lunar, planetary aspects).
+- Live use: those columns go into the fresh-shock stack and the morning watch strip. Eclipses are computed; volcanic unrest is the Smithsonian / NCEI eruption list with a 14-day hold.
+
+### What the morning watch strip encodes
+
+Recurring Davidson / Burns indicators that we can replay, plus the extra high-value families. A flag is only “on” from data available that morning.
+
+| Flag | Who watches it | Source |
+| --- | --- | --- |
+| Solar polar-field window | Davidson 2015 | Wilcox SPF, 40-day delay + train budget |
+| Proton spike | Davidson / Cataldi | OMNI density vs train-era fence |
+| Kp / Dst / Ap storms | both | OMNI |
+| Southward IMF | Davidson (ACE/DSCOVR) | OMNI Bz week count |
+| Halo CME | both | CDAW |
+| Coronal-hole high-speed stream | Davidson | DONKI HSS or fast+thin wind |
+| X-class flare | both | DONKI / SWPC |
+| Solar energetic protons | Davidson | DONKI SEP / GOES SPE |
+| Forbush decrease / GLE | Davidson (cosmic rays) | Oulu neutrons + GLE list |
+| ULF / magnetometer pulse | Davidson (Schumann-adjacent) | INTERMAGNET daily range z-score. A public Schumann archive is still missing. Tremor/LFE catalogs, ambient-noise dv/v, and DAS/SMART have no clean daily public archive we can replay. |
+| Near solar max / descending cycle | Burns | SILSO cycle phase |
+| New/full moon, solar/lunar eclipse, hard aspects | Burns | computed geometry |
+| Weak polar vortex (AO) | Davidson climate stack | NOAA PSL AO |
+| Volcanic unrest | Burns | Smithsonian / NCEI eruptions |
+| Hikurangi slow slip | lab (high-value tectonic) | Slow Earthquake Database |
+| Ocean-bottom pressure drop | lab (high-value loading) | NOAA + GeoNet DART |
+| Sudden Dst commencement | Davidson storm onset | OMNI Dst day-to-day drop |
+| Lopsided sunspot hemispheres | Burns / cycle geometry | SILSO north vs south |
+| TEC anomaly | Pulinets / Burns-adjacent | IGS GIM |
+| Radon spike | lab (high-value gas) | public radon stations |
+| GRACE water-mass load | lab (high-value hydrology) | GRACE-FO mascons |
+| Volcanic SO2 | Burns-adjacent gas | CAMS SO2 |
+| Borehole strain pulse | lab (high-value strain) | EarthScope / UNAVCO |
+| Soil / hydrology load | lab (high-value loading) | ERA5 soil water |
+| Outgoing longwave anomaly | thermal / OLR | NOAA PSL |
+| GPS strain dilatation | lab (high-value GNSS) | GeoNet / IGS |
+| Fireball | Davidson dust/meteor talk | CNEOS |
 
 ### Cataldi / Straser (Radio Emissions / LTPA)
 

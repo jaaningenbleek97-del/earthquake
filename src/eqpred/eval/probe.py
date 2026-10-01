@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Stress-test the leftover M8 hint, and ask where — not whether.
+"""Stress-test the M8 hint, and ask where — not whether.
 
-The last leftover pass could not beat a constant guess on issued boxes.
+The last model pass could not beat a constant guess on issued boxes.
 Earth-wide M8 ranked a bit better. This probe checks whether that ranking
-dies when leftover series are shifted, and whether leftover can name the
+dies when non-catalog series are shifted, and whether the model can name the
 box that gets the next fresh shock. Nothing here writes issued p.
 """
 
@@ -114,7 +114,7 @@ def _thin_p(
     model = _fit_kind("tree", raw_x[np.ix_(train_both, cols)], y[train_both], kw)
     raw_p = _proba(model, raw_x[:, cols])
     p = np.clip((1.0 - mix_a) * climate_full + mix_a * raw_p, 1e-6, 1.0 - 1e-6)
-    return p, f"leftover_thin|mix{mix_a:.2f}", cols
+    return p, f"fresh_thin|mix{mix_a:.2f}", cols
 
 
 def _score_binary(
@@ -165,7 +165,7 @@ def probe_m8_shifts(
         years.append(
             {
                 "year": year,
-                **_score_binary(p0, y, days, train_for_alarm, year_mask, "leftover_thin"),
+                **_score_binary(p0, y, days, train_for_alarm, year_mask, "fresh_thin"),
             }
         )
     shifted = [r for r in rows if r["shift_days"] > 0]
@@ -257,7 +257,7 @@ def _where_pack(
             "n_train": n_train,
             "n_hold": n_hold,
             "majority": majority,
-            "leftover_acc": None,
+            "fresh_acc": None,
             "majority_acc": None,
             "beats_majority": False,
             "note": "Not enough single-box fresh hits to ask where.",
@@ -270,10 +270,10 @@ def _where_pack(
             "n_train": n_train,
             "n_hold": n_hold,
             "majority": majority,
-            "leftover_acc": None,
+            "fresh_acc": None,
             "majority_acc": float((y[hold_single] == majority_idx).mean()),
             "beats_majority": False,
-            "note": "No usable leftover columns for the where question.",
+            "note": "No usable non-catalog columns for the where question.",
         }
     model = Pipeline(
         [
@@ -284,7 +284,7 @@ def _where_pack(
     )
     model.fit(raw_x[np.ix_(train_single, cols)], y[train_single])
     pred = model.predict(raw_x[np.ix_(hold_single, cols)])
-    leftover_acc = float((pred == y[hold_single]).mean())
+    fresh_acc = float((pred == y[hold_single]).mean())
     majority_acc = float((y[hold_single] == majority_idx).mean())
     per_box = []
     for i, rid in enumerate(box_ids):
@@ -306,14 +306,14 @@ def _where_pack(
         "n_hold": n_hold,
         "majority": majority,
         "majority_label": _place(majority),
-        "leftover_acc": leftover_acc,
+        "fresh_acc": fresh_acc,
         "majority_acc": majority_acc,
-        "beats_majority": leftover_acc > majority_acc + 1e-12,
+        "beats_majority": fresh_acc > majority_acc + 1e-12,
         "per_box": per_box,
         "issued": label == "where_issued",
         "note": (
-            f"On later mornings with a fresh hit in exactly one box, leftover named the box "
-            f"{leftover_acc * 100:.1f}% of the time. Always guessing {_place(majority)} gets "
+            f"On later mornings with a fresh hit in exactly one box, the model named the box "
+            f"{fresh_acc * 100:.1f}% of the time. Always guessing {_place(majority)} gets "
             f"{majority_acc * 100:.1f}%."
         ),
     }
@@ -321,14 +321,14 @@ def _where_pack(
 
 def _english(report: dict[str, Any]) -> str:
     bits = [
-        "The leftover probe asked two different questions: is the Earth-wide M8 ranking real, "
-        "and can leftover name the box that gets the next fresh shock."
+        "The probe asked two different questions: is the Earth-wide M8 ranking real, "
+        "and can the model name the box that gets the next fresh shock."
     ]
     m8 = report.get("m8") or {}
     aligned = next((r for r in m8.get("shifts") or [] if r.get("shift_days") == 0), None)
     if aligned and aligned.get("lift") is not None:
         bits.append(
-            f"Aligned leftover M8 lift was {aligned['lift'] * 100:+.1f} pt on later years."
+            f"Aligned M8 lift was {aligned['lift'] * 100:+.1f} pt on later years."
         )
     if m8.get("looks_like_leakage"):
         shifted = [
@@ -339,11 +339,11 @@ def _english(report: dict[str, Any]) -> str:
         best = max(shifted, key=lambda r: r.get("lift") or -1.0, default=None)
         if best:
             bits.append(
-                f"A {best['shift_days']}-day leftover shift still ranked "
+                f"A {best['shift_days']}-day shift still ranked "
                 f"{(best.get('lift') or 0) * 100:+.1f} pt — a yearly cycle, not a forecast."
             )
         else:
-            bits.append("A leftover time-shift kept similar ranking — season or leakage, not a forecast.")
+            bits.append("A time-shift kept similar ranking — season or leakage, not a forecast.")
     years = [y for y in m8.get("years") or [] if y.get("lift") is not None]
     loud = [y for y in years if float(y.get("lift") or 0) > 0.01]
     if loud:
@@ -354,15 +354,15 @@ def _english(report: dict[str, Any]) -> str:
         )
     for key in ("where_issued", "where_transfer"):
         pack = report.get(key) or {}
-        if pack.get("leftover_acc") is None:
+        if pack.get("fresh_acc") is None:
             continue
         beat = "beat" if pack.get("beats_majority") else "did not beat"
         bits.append(
             f"{'Issued NZ boxes' if key == 'where_issued' else 'Japan vs Chile (practice)'} "
             f"{beat} always-guess-{pack.get('majority_label') or pack.get('majority')} "
-            f"({(pack.get('leftover_acc') or 0) * 100:.1f}% vs {(pack.get('majority_acc') or 0) * 100:.1f}%)."
+            f"({(pack.get('fresh_acc') or 0) * 100:.1f}% vs {(pack.get('majority_acc') or 0) * 100:.1f}%)."
         )
-    bits.append("Nothing here writes issued p or this week's leftover number.")
+    bits.append("Nothing here writes issued p or this week's model number.")
     return " ".join(bits)
 
 

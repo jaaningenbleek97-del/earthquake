@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from eqpred.catalog import load_comcat
-from eqpred.eval.hunt import LAGS_DAYS, TARGETS, driver_family, load_hunt
+from eqpred.eval.hunt import LAGS_DAYS, TARGETS, driver_family, load_hunt, load_hunt_fresh
 from eqpred.eval.strategies import _window_hits
 from eqpred.models.predict import BOX_MAG, GLOBAL_MAG
 from eqpred.paths import data_dir, feature_dir
@@ -339,9 +339,10 @@ def pack_from_hunt(
     root: Path | None = None,
     limit: int = 24,
 ) -> dict[str, Any]:
-    hunt = load_hunt(root)
+    # Default `eqpred hunt` writes hunt_fresh.json; hunt.json is the --etas-residual run.
+    hunt = load_hunt_fresh(root) or load_hunt(root)
     if not hunt:
-        raise FileNotFoundError("no hunt.json; run eqpred hunt first")
+        raise FileNotFoundError("no hunt report; run eqpred hunt first")
     rows = [
         row
         for row in hunt.get("confirmed") or []

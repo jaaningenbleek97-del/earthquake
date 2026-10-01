@@ -52,8 +52,11 @@ def prediction(
     drivers: list,
     rationale: str | None = None,
     competitor_etas_p: float | None = None,
+    competitor_climatology_p: float | None = None,
     registry_id: str | None = None,
     code_hash: str | None = None,
+    written_at: datetime | None = None,
+    card_kind: str | None = None,
 ) -> dict[str, Any]:
     rec: dict[str, Any] = {
         "prediction_id": prediction_id,
@@ -72,8 +75,14 @@ def prediction(
         rec["rationale"] = rationale
     if competitor_etas_p is not None:
         rec["competitor_etas_p"] = float(competitor_etas_p)
+    if competitor_climatology_p is not None:
+        rec["competitor_climatology_p"] = float(competitor_climatology_p)
     if registry_id:
         rec["registry_id"] = registry_id
     if code_hash:
         rec["code_hash"] = code_hash
+    if written_at is not None:
+        rec["written_at"] = iso(written_at)
+    if card_kind:
+        rec["card_kind"] = card_kind
     return rec

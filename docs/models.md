@@ -6,11 +6,11 @@ The thing we are building is a **predictor that uses unconventional data**. Cata
 
 | Head | Horizon | Output | Drivers | Build |
 | --- | --- | --- | --- | --- |
-| Fusion predictor (TFT / Transformer) | 1d, 7d, later 90d | Probability map + issued `prediction` records | Catalog **and** solar, wind, storms, SPF, tides, lunar, later TEC | First real model |
-| Solar-magnetic alarm | Days; M8+ as its own card | Binary alarm + p | Wilcox SPF windows, proton density, Kp/Dst, cycle phase | First real model |
-| Geometry alarm | Hours–days | Binary or p on loaded cells | Tidal strain, lunar distance/declination, optional planetary aspects | First real model |
+| Fresh-shock classifier (`fresh.mainshock.v1`) | 7d | Issued probability + climatology beside it | Every timestamped non-catalog source. Catalog counts and ETAS λ stay out. Target is a declustered first shock. | Issued product |
+| Solar-magnetic alarm | Days; M8+ as its own card | Binary alarm | Wilcox SPF windows | Second head |
+| Geometry / non-catalog internals | Hours–days | Diagnostic only | Tidal strain, lunar geometry, planetary aspects | Features, not a separate issued card |
 
-These write [prediction records](predictions.md). That is the product.
+These write [prediction records](predictions.md). Fresh shock is the product.
 
 ## Skeptic baselines (competition, not the deliverable)
 
@@ -18,23 +18,23 @@ These write [prediction records](predictions.md). That is the product.
 | --- | --- | --- |
 | Poisson + GR + smoothed seismicity | Dumb spatial rate. If we cannot beat this, the neural net is lost. | Yes, as a foil |
 | Reasenberg–Jones | Aftershock decay after a large event | Yes, as a foil |
-| Space–time ETAS | Best operational clustering model. Italy, NZ, USGS aftershocks. | Yes, as a foil — [lmizrahi/etas](https://github.com/lmizrahi/etas) |
+| Space–time ETAS | Best operational clustering model. Italy, NZ, USGS aftershocks. | Lab foil only — [lmizrahi/etas](https://github.com/lmizrahi/etas). Not written as issued cards. |
 | EEPAS | Medium-term catalog “precursory scale increase” (NZ) | Optional foil for 90d |
 | STEP / UCERF / NSHM | Already exist in the world | Do not rebuild |
 
 ETAS is strong **after** a sequence starts and weak **before** the first large event. That gap is where solar, magnetic, and geometry drivers have to earn their keep. If our “predictions” only light up after an M7, we failed.
 
-## How the fusion head should think
+## How the fresh-shock head should think
 
-Not “predict the next magnitude from lat-lon-mag rows.” That just memorizes where quakes already happen.
+Not “predict the next aftershock from recent catalog counts.” That is ETAS.
 
 Do this instead:
 
-- Daily (then hourly) tensors: per-cell catalog history + a global exogenous vector (SPF, protons, Kp, tides, moon, …).
-- Multi-horizon heads: 1 day and 7 days.
-- Loss: proper scoring (log likelihood / CRPS) on whether M≥threshold occurred in the cell, not accuracy on a balanced toy set.
+- Daily non-catalog stack known that morning. Catalog counts stay out.
+- Target: declustered first shock in the box and window.
 - Train earlier years, test later years. No shuffle.
-- Ablation: catalog-only vs catalog+solar vs catalog+geometry vs full. We want to know which weird inputs actually move the call.
+- Issued p is the model call even when it has not beaten climatology yet. The historical rate sits beside it.
+- ETAS stays as the skeptic we refuse to ship.
 
 Published cousins (none of these are the product, they are architecture hints):
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""GFZ Hpo (Hp30 / ap30) — higher-cadence Kp-like leftover magnetosphere index."""
+"""GFZ Hpo (Hp30 / ap30) — higher-cadence Kp-like magnetosphere index."""
 
 from datetime import datetime, timedelta, timezone
 

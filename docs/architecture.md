@@ -115,6 +115,18 @@ Unconventional drivers start in Wave 1. We do not wait for an agency blessing.
 
 Swarm / CSES, InSAR, volcano SO2. Raw waveforms are early warning, a different machine.
 
+### Wave 4
+
+`eqpred ingest --wave 4` pulls NOAA/GeoNet DART ocean-bottom pressure and the Smithsonian Holocene eruption list. Hemispheric sunspots ride on the existing SILSO pull. Solar-eclipse geometry is computed with the lunar series. Already-ingested high-value overlays (GRACE, ERA5 soil water, radon, SO2, borehole strain, GNSS dilatation, OLR) get morning watch flags too. These join the feature store and the watch strip; they do not write issued *p* by themselves.
+
+### Earth-state tools
+
+`eqpred analog` (also `anomaly` / `graph`) fits three label-free layers on the daily store and writes `data/eval/earth_state.json`. None of them rewrite issued *p*.
+
+1. **Anomaly** — PCA reconstruction, Mahalanobis distance, and IsolationForest on GNSS / ocean / space-weather / loading columns. Fit on the training era only. No earthquake labels.
+2. **Analogs** — nearest training mornings in that same state. A neighbor is only used after its next 30 days have closed. The analog chance is the hit rate among those neighbors.
+3. **Fault graph** — Hikurangi, Alpine, and Kermadec split into along-strike segments. Neighbor energy crosses along-strike, trench-continuity, and Marlborough-transfer edges.
+
 ## Model heads
 
 All heads read `features_cell` ⋈ `features_global` at `issue_time` and write [`prediction` records](predictions.md).

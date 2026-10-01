@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-"""Leftover-only derived series. No catalog counts.
+"""Non-catalog derived series. No catalog counts.
 
 Turns sources we already have into anomalies, streaks, and cheap planet
-geometry so the hunter and the leftover model see more than raw daily levels.
+geometry so the hunter and the fresh-shock model see more than raw daily levels.
 """
 
 import math
@@ -38,6 +38,10 @@ DERIVE_COLS = (
     "gnss_east_1d",
     "gnss_east_3d",
     "gnss_east_7d",
+    "gnss_strain_nz_dilatation_30d",
+    "gnss_strain_nz_shear_30d",
+    "tide_nz_mm",
+    "insar_los_mm",
     "goes_proton_10mev",
     "xray_peak_wm2",
     "mag_h_nt",
@@ -45,8 +49,20 @@ DERIVE_COLS = (
     "mag_dbdt_nt",
     "ulf_pc5_nt",
     "ulf_dbdt_nt",
+    "swarm_f_res_nt",
+    "swarm_f_res_range_nt",
+    "swarm_f_res_dbdt_nt",
+    "swarm_hikurangi_f_res_nt",
+    "swarm_alpine_f_res_nt",
+    "swarm_kermadec_f_res_nt",
+    "cses_hepd_e",
+    "cses_hepd_p",
     "strain_ee_nstrain",
+    "strain_ee_range_nstrain",
+    "strain_ee_dbdt_nstrain",
     "radon_bq_m3",
+    "radon_range_bq_m3",
+    "radon_dbdt_bq_m3",
     "grace_hikurangi_lwe_cm",
     "grace_alpine_lwe_cm",
     "so2_kermadec_kgm2",
@@ -62,6 +78,8 @@ DERIVE_COLS = (
     "climate_aao",
     "climate_nina34",
     "climate_olr",
+    "era5_swvl1",
+    "era5_sp_pa",
     "climate_mjo_amp",
     "neutron_oulu_count",
     "neutron_domc_count",
@@ -84,6 +102,38 @@ DERIVE_COLS = (
     "hp_mean",
     "flare_score",
     "flare_m_count",
+    "sunspot_north",
+    "sunspot_south",
+    "dart_height_m",
+    "dart_range_m",
+    "dart_d1_m",
+    "dart_nz_m",
+    "volcano_vei_max",
+    "tremor_n",
+    "lfe_n",
+    "well_level_m",
+    "well_d1_m",
+    "well_nz_d1_m",
+    "scint_s4",
+    "scint_s4_nz",
+    "scint_s4_max",
+    "haarp_on",
+    "dvv_nz",
+    "dvv_hikurangi",
+    "dvv_alpine",
+    "wspr_snr_med",
+    "wspr_nz_snr",
+    "wiki_eq_views",
+    "hydro_nz",
+    "hydro_gwet",
+    "hydro_precip",
+    "gnssa_hikurangi",
+    "roti_nz",
+    "roti_slips",
+    "smap_sm",
+    "sdarn_unwin",
+    "vlf_amp",
+    "tir_ts",
 )
 
 CROSS_PAIRS = (
@@ -113,6 +163,7 @@ CROSS_PAIRS = (
     ("electron_2mev", "kp"),
     ("neutron_sopo_count", "imf_bz_nt"),
     ("climate_olr", "tidal_strain"),
+    ("swarm_f_res_nt", "kp"),
 )
 
 
@@ -192,7 +243,7 @@ def planetary_frame(days: pd.DatetimeIndex) -> pd.DataFrame:
 
 
 def _igrf_dipole(year_frac: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """IGRF-13 2020 dipole geomagnetic pole. Leftover wander, not a measurement."""
+    """IGRF-13 2020 dipole geomagnetic pole. Slow wander, not a measurement."""
     dt = np.asarray(year_frac, dtype=float) - 2020.0
     g10 = -29404.8 + 5.7 * dt
     g11 = -1450.9 + 7.4 * dt
@@ -212,8 +263,8 @@ def _igrf_dipole_lon(year_frac: np.ndarray) -> np.ndarray:
     return lon
 
 
-def leftover_derived(feat: pd.DataFrame) -> pd.DataFrame:
-    """Anomalies and storm memory on leftover columns already in the daily stack."""
+def fresh_derived(feat: pd.DataFrame) -> pd.DataFrame:
+    """Anomalies and storm memory on fresh-shock columns already in the daily stack."""
     work = feat.copy()
     if "gnss_east_mm" in work.columns:
         east = pd.to_numeric(work["gnss_east_mm"], errors="coerce")
@@ -234,6 +285,9 @@ def leftover_derived(feat: pd.DataFrame) -> pd.DataFrame:
         doy = days.dayofyear.to_numpy()
         extra["cal_doy_sin"] = pd.Series(np.sin(2.0 * np.pi * doy / 365.25), index=work.index)
         extra["cal_doy_cos"] = pd.Series(np.cos(2.0 * np.pi * doy / 365.25), index=work.index)
+        extra["cal_weekday"] = pd.Series(days.dayofweek.to_numpy(dtype=float), index=work.index)
+        extra["cal_weekend"] = pd.Series((days.dayofweek.to_numpy() >= 5).astype(float), index=work.index)
+        extra["cal_payday"] = pd.Series(((days.day >= 14) & (days.day <= 16)).astype(float), index=work.index)
     for col in DERIVE_COLS:
         if col not in work.columns:
             continue
@@ -336,6 +390,149 @@ def leftover_derived(feat: pd.DataFrame) -> pd.DataFrame:
         extra["hss_7d"] = pd.to_numeric(work["hss_flag"], errors="coerce").rolling(7, min_periods=1).max()
     if "flare_x_count" in work.columns:
         extra["flare_x_7d"] = pd.to_numeric(work["flare_x_count"], errors="coerce").rolling(7, min_periods=1).max()
+    speed = work.get("solar_wind_speed_kms")
+    dens = work.get("proton_density_cm3")
+    if speed is not None and dens is not None:
+        extra["coronal_hole_stream"] = (
+            (pd.to_numeric(speed, errors="coerce") >= 500.0)
+            & (pd.to_numeric(dens, errors="coerce") <= 5.0)
+        ).astype(float)
+    if "imf_bx_nt" in work.columns:
+        bx = pd.to_numeric(work["imf_bx_nt"], errors="coerce")
+        extra["imf_sector_boundary"] = ((np.sign(bx) * np.sign(bx.shift(1))) < 0).astype(float)
+    if "solar_cycle_phase" in work.columns:
+        phase = pd.to_numeric(work["solar_cycle_phase"], errors="coerce")
+        extra["solar_max_near"] = ((phase > 0.40) & (phase < 0.65)).astype(float)
+        extra["solar_min_near"] = ((phase < 0.15) | (phase > 0.85)).astype(float)
+        extra["solar_descending"] = (phase > 0.55).astype(float)
+        crossed = (phase.shift(1) >= 0.50) & (phase < 0.50)
+        last_max = pd.Series(np.where(crossed, np.arange(len(phase)), np.nan), index=work.index)
+        last_max = last_max.ffill()
+        extra["solar_days_since_max"] = pd.Series(np.arange(len(phase)), index=work.index) - last_max
+    if "climate_ao" in work.columns:
+        ao = pd.to_numeric(work["climate_ao"], errors="coerce")
+        extra["polar_vortex_weak"] = (ao <= -1.5).astype(float)
+    if "ap" in work.columns:
+        extra["ap_storm"] = (pd.to_numeric(work["ap"], errors="coerce") >= 50.0).astype(float)
+    flare_x = extra.get("flare_x_7d")
+    if flare_x is None and "flare_x_count" in work.columns:
+        flare_x = pd.to_numeric(work["flare_x_count"], errors="coerce")
+    if flare_x is not None:
+        extra["flare_x_on"] = (pd.to_numeric(flare_x, errors="coerce") > 0).astype(float)
+    def _on(value) -> pd.Series:
+        series = pd.to_numeric(value, errors="coerce")
+        if not isinstance(series, pd.Series):
+            series = pd.Series(series, index=work.index)
+        return series.reindex(work.index).fillna(0) > 0.5
+
+    if "hss_flag" in work.columns or "hss_7d" in extra or "coronal_hole_stream" in extra:
+        extra["hss_on"] = (
+            _on(work["hss_flag"] if "hss_flag" in work.columns else 0.0)
+            | _on(extra.get("coronal_hole_stream", 0.0))
+            | _on(extra.get("hss_7d", 0.0))
+        ).astype(float)
+    if "sep_flag" in work.columns or "goes_spe" in work.columns:
+        extra["spe_on"] = (
+            _on(work["sep_flag"] if "sep_flag" in work.columns else 0.0)
+            | _on(work["goes_spe"] if "goes_spe" in work.columns else 0.0)
+        ).astype(float)
+    if "planet_hard_aspects" in work.columns:
+        extra["planet_hard_on"] = (pd.to_numeric(work["planet_hard_aspects"], errors="coerce") >= 2.0).astype(float)
+    if "dst_nt" in work.columns:
+        dst = pd.to_numeric(work["dst_nt"], errors="coerce")
+        extra["ssc_dst"] = (dst.diff(1) <= -30.0).astype(float)
+    if "sunspot_north" in work.columns and "sunspot_south" in work.columns:
+        north = pd.to_numeric(work["sunspot_north"], errors="coerce")
+        south = pd.to_numeric(work["sunspot_south"], errors="coerce")
+        total = (north + south).replace(0, np.nan)
+        extra["sunspot_asymmetry"] = (north - south).abs() / total
+        extra["sunspot_hemisphere_skew"] = ((north - south).abs() >= 20.0).astype(float)
+    if "dart_d1_m" in work.columns:
+        drop = pd.to_numeric(work["dart_d1_m"], errors="coerce")
+        extra["dart_drop"] = (drop <= -0.04).astype(float)
+    z_ulf = extra.get("ulf_pc5_nt_z30")
+    if z_ulf is not None:
+        extra["ulf_high"] = (pd.to_numeric(z_ulf, errors="coerce").abs() >= 2.0).astype(float)
+    z_tec = extra.get("tec_tecu_z30")
+    if z_tec is not None:
+        extra["tec_storm"] = (pd.to_numeric(z_tec, errors="coerce").abs() >= 2.0).astype(float)
+    z_radon = extra.get("radon_bq_m3_z30")
+    if z_radon is not None:
+        extra["radon_high"] = (pd.to_numeric(z_radon, errors="coerce").abs() >= 2.0).astype(float)
+    z_grace = extra.get("grace_hikurangi_lwe_cm_z30")
+    if z_grace is not None:
+        extra["grace_wet"] = (pd.to_numeric(z_grace, errors="coerce") >= 2.0).astype(float)
+    z_so2 = extra.get("so2_kermadec_kgm2_z30")
+    if z_so2 is not None:
+        extra["so2_high"] = (pd.to_numeric(z_so2, errors="coerce") >= 2.0).astype(float)
+    z_strain = extra.get("strain_ee_dbdt_nstrain_z30")
+    if z_strain is None:
+        z_strain = extra.get("strain_ee_nstrain_z30")
+    if z_strain is not None:
+        extra["strain_pulse"] = (pd.to_numeric(z_strain, errors="coerce").abs() >= 2.0).astype(float)
+    z_soil = extra.get("era5_swvl1_z30")
+    if z_soil is not None:
+        extra["era5_wet"] = (pd.to_numeric(z_soil, errors="coerce") >= 2.0).astype(float)
+    z_olr = extra.get("climate_olr_z30")
+    if z_olr is not None:
+        extra["olr_anomaly"] = (pd.to_numeric(z_olr, errors="coerce").abs() >= 2.0).astype(float)
+    z_gnss = extra.get("gnss_strain_nz_dilatation_30d_z30")
+    if z_gnss is not None:
+        extra["gnss_dilatation"] = (pd.to_numeric(z_gnss, errors="coerce").abs() >= 2.0).astype(float)
+    if "sse_hikurangi" in work.columns:
+        extra["sse_on"] = (pd.to_numeric(work["sse_hikurangi"], errors="coerce") > 0.5).astype(float)
+    if "tremor_on" not in work.columns and ("tremor_n" in work.columns or "lfe_n" in work.columns):
+        extra["tremor_on"] = (
+            (pd.to_numeric(work["tremor_n"], errors="coerce").fillna(0) if "tremor_n" in work.columns else 0)
+            + (pd.to_numeric(work["lfe_n"], errors="coerce").fillna(0) if "lfe_n" in work.columns else 0)
+            > 0
+        ).astype(float)
+    z_well = extra.get("well_d1_m_z30")
+    if z_well is None:
+        z_well = extra.get("well_nz_d1_m_z30")
+    if z_well is not None:
+        extra["well_drop"] = (pd.to_numeric(z_well, errors="coerce") <= -2.0).astype(float)
+    elif "well_d1_m" in work.columns:
+        extra["well_drop"] = (pd.to_numeric(work["well_d1_m"], errors="coerce") <= -0.05).astype(float)
+    z_scint = extra.get("scint_s4_z30")
+    if z_scint is None:
+        z_scint = extra.get("scint_s4_nz_z30")
+    if z_scint is not None:
+        extra["scint_high"] = (pd.to_numeric(z_scint, errors="coerce") >= 2.0).astype(float)
+    if "haarp_on" in work.columns:
+        extra["haarp_on"] = _on(work["haarp_on"])
+    z_dvv = extra.get("dvv_nz_z30")
+    if z_dvv is None:
+        z_dvv = extra.get("dvv_hikurangi_z30")
+    if z_dvv is not None:
+        extra["dvv_drop"] = (pd.to_numeric(z_dvv, errors="coerce") <= -2.0).astype(float)
+    z_wspr = extra.get("wspr_snr_med_z30")
+    if z_wspr is None:
+        z_wspr = extra.get("wspr_nz_snr_z30")
+    if z_wspr is not None:
+        extra["wspr_quiet"] = (pd.to_numeric(z_wspr, errors="coerce") <= -2.0).astype(float)
+    z_wiki = extra.get("wiki_eq_views_z30")
+    if z_wiki is not None:
+        extra["wiki_hot"] = (pd.to_numeric(z_wiki, errors="coerce") >= 2.0).astype(float)
+    z_wet = extra.get("hydro_gwet_z30")
+    if z_wet is None:
+        z_wet = extra.get("smap_sm_z30")
+    if z_wet is not None:
+        extra["hydro_wet"] = (pd.to_numeric(z_wet, errors="coerce") >= 2.0).astype(float)
+    z_roti = extra.get("roti_nz_z30")
+    if z_roti is not None:
+        extra["roti_high"] = (pd.to_numeric(z_roti, errors="coerce") >= 2.0).astype(float)
+    if "volcano_vei4" in work.columns or "volcano_nz" in work.columns:
+        extra["volcano_unrest"] = (
+            _on(work["volcano_vei4"] if "volcano_vei4" in work.columns else 0.0)
+            | _on(work["volcano_nz"] if "volcano_nz" in work.columns else 0.0)
+        ).astype(float)
+    if "solar_eclipse_window" not in work.columns and "lunar_phase_deg" in work.columns and "lunar_declination_deg" in work.columns:
+        phase = pd.to_numeric(work["lunar_phase_deg"], errors="coerce")
+        decl = pd.to_numeric(work["lunar_declination_deg"], errors="coerce").abs()
+        extra["solar_eclipse_window"] = ((np.minimum(phase, 360.0 - phase) < 18.0) & (decl < 1.8)).astype(float)
+    if "lunar_eclipse_geom" in work.columns and "lunar_eclipse_window" not in work.columns:
+        extra["lunar_eclipse_window"] = pd.to_numeric(work["lunar_eclipse_geom"], errors="coerce")
     new = {k: v for k, v in extra.items() if k not in work.columns}
     if not new:
         return work

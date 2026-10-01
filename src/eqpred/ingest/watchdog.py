@@ -22,6 +22,10 @@ from eqpred.ingest.geonet_gnss import LATENCY as GEONET_GNSS_LATENCY
 from eqpred.ingest.gnss import LATENCY as NGL_LATENCY
 from eqpred.ingest.grace import LATENCY as GRACE_LATENCY
 from eqpred.ingest.intermagnet import LATENCY as IMAG_LATENCY
+from eqpred.ingest.swarm import LATENCY as SWARM_LATENCY
+from eqpred.ingest.strain import LATENCY as STRAIN_LATENCY
+from eqpred.ingest.cses import LATENCY as CSES_LATENCY
+from eqpred.ingest.radon import LATENCY as RADON_LATENCY
 from eqpred.ingest.cme import LATENCY as CME_LATENCY
 from eqpred.ingest.eop import LATENCY as EOP_LATENCY
 from eqpred.ingest.fireball import LATENCY as FIREBALL_LATENCY
@@ -40,7 +44,27 @@ from eqpred.ingest.sse import LATENCY as SSE_LATENCY
 from eqpred.ingest.storms import LATENCY as STORM_LATENCY
 from eqpred.ingest.swpc import LATENCY as SWPC_LATENCY
 from eqpred.ingest.tec import LATENCY as TEC_LATENCY
+from eqpred.ingest.tide import LATENCY as TIDE_LATENCY
+from eqpred.ingest.insar import LATENCY as INSAR_LATENCY
 from eqpred.ingest.wilcox import LATENCY as WILCOX_LATENCY
+from eqpred.ingest.climate import LATENCY as PSL_LATENCY
+from eqpred.ingest.dart import LATENCY as DART_LATENCY
+from eqpred.ingest.volcano import LATENCY as VOLCANO_LATENCY
+from eqpred.ingest.tremor import LATENCY as TREMOR_LATENCY
+from eqpred.ingest.wells import LATENCY as WELL_LATENCY
+from eqpred.ingest.cosmic2 import LATENCY as COSMIC2_LATENCY
+from eqpred.ingest.haarp import LATENCY as HAARP_LATENCY
+from eqpred.ingest.dvv import LATENCY as DVV_LATENCY
+from eqpred.ingest.wspr import LATENCY as WSPR_LATENCY
+from eqpred.ingest.wiki import LATENCY as WIKI_LATENCY
+from eqpred.ingest.hydro import LATENCY as HYDRO_SURFACE_LATENCY
+from eqpred.ingest.gnssa import LATENCY as GNSSA_LATENCY
+from eqpred.ingest.roti import LATENCY as ROTI_LATENCY
+from eqpred.ingest.smap import LATENCY as SMAP_LATENCY
+from eqpred.ingest.superdarn import LATENCY as SDARN_LATENCY
+from eqpred.ingest.vlf import LATENCY as VLF_LATENCY
+from eqpred.ingest.tir import LATENCY as TIR_LATENCY
+from eqpred.ingest.das import LATENCY as DAS_LATENCY
 from eqpred.records import iso
 from eqpred.stamp import parse_utc, utc_ts
 
@@ -65,8 +89,8 @@ SPECS: tuple[SourceSpec, ...] = (
     SourceSpec("usgs.comcat", COMCAT_LATENCY, COMCAT_SLACK, True, "score catalog + ETAS"),
     SourceSpec("nasa.omni", OMNI_LATENCY, timedelta(days=5), True, "solar-wind / Kp / IMF"),
     SourceSpec("wilcox.spf", WILCOX_LATENCY, timedelta(days=21), False, "polar field / Davidson window"),
-    SourceSpec("sidc.silso", SILSO_LATENCY, timedelta(days=7), False, "sunspot cycle"),
-    SourceSpec("noaa.swpc", SWPC_LATENCY, timedelta(days=2), False, "live GOES / Kp JSON"),
+    SourceSpec("sidc.silso", SILSO_LATENCY, timedelta(days=21), False, "sunspot cycle"),
+    SourceSpec("noaa.swpc", SWPC_LATENCY, timedelta(days=5), False, "live GOES / Kp JSON"),
     SourceSpec("computed.geometry", timedelta(0), timedelta(days=1), False, "tides / lunar geometry"),
     SourceSpec("nasa.omni_storm", STORM_LATENCY, timedelta(days=3), False, "hourly Dst storm onsets"),
     SourceSpec("geonet.fdsn", GEONET_LATENCY, GEONET_SLACK, False, "NZ catalog overlay"),
@@ -74,11 +98,11 @@ SPECS: tuple[SourceSpec, ...] = (
     SourceSpec("ngl.gnss", NGL_LATENCY, timedelta(days=7), False, "NGL GNSS"),
     SourceSpec("igs.tec", TEC_LATENCY, timedelta(days=14), False, "weekly IGS TEC"),
     SourceSpec("copernicus.era5", ERA5_LATENCY, timedelta(days=7), False, "NZ loading"),
-    SourceSpec("intermagnet.gin", IMAG_LATENCY, timedelta(days=3), False, "ground magnetics"),
+    SourceSpec("intermagnet.gin", IMAG_LATENCY, timedelta(days=7), False, "ground magnetics"),
     SourceSpec("fdsn.japan", COMCAT_LATENCY, GEONET_SLACK, False, "Japan FDSN overlay"),
     SourceSpec("fdsn.chile", COMCAT_LATENCY, GEONET_SLACK, False, "Chile FDSN overlay"),
-    SourceSpec("noaa.goes_protons", PROTON_LATENCY, timedelta(days=2), False, "GOES protons / SEP"),
-    SourceSpec("noaa.goes_electrons", ELECTRON_LATENCY, timedelta(days=2), False, "GOES electrons"),
+    SourceSpec("noaa.goes_protons", PROTON_LATENCY, timedelta(days=5), False, "GOES protons / SEP"),
+    SourceSpec("noaa.goes_electrons", ELECTRON_LATENCY, timedelta(days=5), False, "GOES electrons"),
     SourceSpec("csr.grace", GRACE_LATENCY, timedelta(days=90), False, "GRACE-FO mass"),
     SourceSpec("cams.so2", SO2_LATENCY, timedelta(days=14), False, "Kermadec SO2"),
     SourceSpec("slowslip.sse", SSE_LATENCY, timedelta(days=90), False, "Hikurangi / eqdb SSE"),
@@ -91,6 +115,30 @@ SPECS: tuple[SourceSpec, ...] = (
     SourceSpec("bom.mjo", MJO_LATENCY, timedelta(days=14), False, "Madden–Julian Oscillation"),
     SourceSpec("gfz.hpo", HPO_LATENCY, timedelta(days=7), False, "GFZ Hp30 magnetosphere index"),
     SourceSpec("nasa.donki", DONKI_LATENCY, timedelta(days=14), False, "DONKI flares / HSS / SEP"),
+    SourceSpec("esa.swarm", SWARM_LATENCY, timedelta(days=14), False, "Swarm MAG residual"),
+    SourceSpec("earthscope.strain", STRAIN_LATENCY, timedelta(days=21), False, "PBO borehole strain"),
+    SourceSpec("esa.cses", CSES_LATENCY, timedelta(days=21), False, "CSES HEPD via Limadou"),
+    SourceSpec("radon.public", RADON_LATENCY, timedelta(days=21), False, "IRON soil radon (Italy, ends 2021)"),
+    SourceSpec("uhslc.tide", TIDE_LATENCY, timedelta(days=45), False, "UHSLC sea level"),
+    SourceSpec("comet.insar", INSAR_LATENCY, timedelta(days=45), False, "COMET LiCSAR LOS"),
+    SourceSpec("noaa.psl", PSL_LATENCY, timedelta(days=60), False, "climate indices"),
+    SourceSpec("noaa.dart", DART_LATENCY, timedelta(days=5), False, "ocean-bottom pressure"),
+    SourceSpec("si.gvp", VOLCANO_LATENCY, timedelta(days=14), False, "volcanic eruptions"),
+    SourceSpec("eqdb.tremor", TREMOR_LATENCY, timedelta(days=90), False, "Hikurangi / Alpine tremor LFE"),
+    SourceSpec("hydro.wells", WELL_LATENCY, timedelta(days=14), False, "NZ / USGS groundwater"),
+    SourceSpec("ucar.cosmic2", COSMIC2_LATENCY, timedelta(days=14), False, "COSMIC-2 scintillation S4"),
+    SourceSpec("gi.haarp", HAARP_LATENCY, timedelta(days=30), False, "HAARP campaign on/off"),
+    SourceSpec("geonet.dvv", DVV_LATENCY, timedelta(days=14), False, "GeoNet ambient-noise dv/v"),
+    SourceSpec("ham.wspr", WSPR_LATENCY, timedelta(days=7), False, "WSPR NZ path SNR"),
+    SourceSpec("wiki.pageviews", WIKI_LATENCY, timedelta(days=14), False, "Wikipedia earthquake pageviews"),
+    SourceSpec("hydro.surface", HYDRO_SURFACE_LATENCY, timedelta(days=14), False, "NZ lakes / rivers / wet weeks"),
+    SourceSpec("mgds.gnssa", GNSSA_LATENCY, timedelta(days=90), False, "Hikurangi GNSS-A seafloor"),
+    SourceSpec("geonet.roti", ROTI_LATENCY, timedelta(days=14), False, "GeoNet RINEX ROTI / slips"),
+    SourceSpec("nasa.smap", SMAP_LATENCY, timedelta(days=21), False, "SMAP NZ soil moisture"),
+    SourceSpec("superdarn.unwin", SDARN_LATENCY, timedelta(days=21), False, "SuperDARN Unwin HF radar"),
+    SourceSpec("vlf.public", VLF_LATENCY, timedelta(days=21), False, "VLF foil (NWC / northern trap)"),
+    SourceSpec("nasa.tir", TIR_LATENCY, timedelta(days=14), False, "thermal IR / skin-temp foil"),
+    SourceSpec("das.haast", DAS_LATENCY, timedelta(days=90), False, "Haast DAS partnership stub"),
 )
 
 REQUIRED = tuple(spec.source for spec in SPECS if spec.required)
@@ -169,6 +217,111 @@ def _inspect(
         "lag_days": None if lag_days is None else round(lag_days, 3),
         "latency_days": spec.latency / timedelta(days=1),
         "slack_days": spec.slack / timedelta(days=1),
+    }
+
+
+# Known finite archives. A last-day older than slack is not a dead feed.
+ARCHIVE_ENDED = {
+    "radon.public": "IRON dump ends 2021",
+    "wilcox.spf": "Wilcox Polar.html ended",
+    "earthscope.strain": "PBO L2 public dump ends 2023",
+}
+
+# We pulled the latest public file; the publisher has not posted a newer day.
+PUBLISHER_LAG = {
+    "cams.so2": "CAMS EAC4 2026 not on ADS yet",
+    "bom.mjo": "BOM RMM realtime file last posted 2026-06-24",
+}
+
+# Event lists and monthly products: a multi-week gap is normal.
+SPARSE_OK = {
+    "nasa.omni_storm",
+    "csr.grace",
+    "cneos.fireball",
+    "oulu.gle",
+    "si.gvp",
+    "noaa.swpc",
+    "noaa.psl",
+    "igs.tec",
+}
+
+
+def coverage_report(
+    as_of: datetime | pd.Timestamp | None = None,
+    root: Path | None = None,
+) -> dict[str, Any]:
+    """Date span, largest gap, and freshness for every registered source."""
+    when = as_of or datetime.now(timezone.utc)
+    fresh = freshness_report(when, root)
+    by_fresh = {row["source"]: row for row in fresh["sources"]}
+    rows: list[dict[str, Any]] = []
+    for spec in SPECS:
+        frame = _latest_frame(spec.source, root)
+        first = last = None
+        n_rows = 0
+        n_days = 0
+        max_gap = None
+        coverage_pct = None
+        if not frame.empty and "observed_at" in frame.columns:
+            days = parse_utc(frame["observed_at"]).dt.floor("D").dropna().drop_duplicates().sort_values()
+            n_rows = int(len(frame))
+            n_days = int(len(days))
+            if n_days:
+                first = _iso_ts(days.min())
+                last = _iso_ts(days.max())
+                diffs = days.diff().dt.days.dropna()
+                if len(diffs):
+                    max_gap = int(diffs.max())
+                span = int((days.max() - days.min()).days) + 1
+                coverage_pct = round(100.0 * n_days / span, 1) if span else None
+        clock = by_fresh.get(spec.source) or {}
+        status = clock.get("status") or "missing"
+        note = ARCHIVE_ENDED.get(spec.source) or PUBLISHER_LAG.get(spec.source)
+        if status == "missing":
+            verdict = "missing"
+        elif spec.source in ARCHIVE_ENDED:
+            verdict = "archive_ended"
+        elif spec.source in PUBLISHER_LAG:
+            verdict = "publisher_lag"
+        elif spec.source in SPARSE_OK:
+            # Event lists and monthly products: weeks without a new event is normal.
+            verdict = "complete"
+        elif status == "stale":
+            verdict = "stale"
+        elif max_gap is not None and max_gap > 21:
+            verdict = "gappy"
+        else:
+            verdict = "complete"
+        rows.append(
+            {
+                "source": spec.source,
+                "role": spec.role,
+                "required": spec.required,
+                "verdict": verdict,
+                "status": status,
+                "note": note,
+                "n_rows": n_rows,
+                "n_days": n_days,
+                "first_observed_at": first,
+                "last_observed_at": last,
+                "max_gap_days": max_gap,
+                "coverage_pct": coverage_pct,
+                "lag_days": clock.get("lag_days"),
+            }
+        )
+    missing = [row["source"] for row in rows if row["verdict"] == "missing"]
+    stale = [row["source"] for row in rows if row["verdict"] == "stale"]
+    gappy = [row["source"] for row in rows if row["verdict"] == "gappy"]
+    publisher_lag = [row["source"] for row in rows if row["verdict"] == "publisher_lag"]
+    return {
+        "as_of": _iso_ts(utc_ts(when)),
+        "ok": fresh["ok"],
+        "blockers": fresh["blockers"],
+        "missing": missing,
+        "stale": stale,
+        "gappy": gappy,
+        "publisher_lag": publisher_lag,
+        "sources": rows,
     }
 
 

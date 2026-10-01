@@ -24,11 +24,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="eqpred", description="Unconventional earthquake prediction lab")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    ing = sub.add_parser("ingest", help="Wave 1, 2, or 3 connectors")
+    ing = sub.add_parser("ingest", help="Wave 1–4 connectors")
     ing.add_argument("--start", required=True)
     ing.add_argument("--end", required=True)
     ing.add_argument("--minmag", type=float, default=4.5)
-    ing.add_argument("--wave", default="1", choices=["1", "2", "3", "all"])
+    ing.add_argument("--wave", default="1", choices=["1", "2", "3", "4", "all"])
     ing.add_argument(
         "--only",
         default=None,
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     pred = sub.add_parser("predict", help="Issue dated prediction cards")
     pred.add_argument("--start", required=True)
     pred.add_argument("--end", required=True)
-    pred.add_argument("--horizon", type=int, default=7)
+    pred.add_argument("--horizon", type=int, default=30)
 
     bat = sub.add_parser("battery", help="Paper tests + 180-day solar time-shift null")
     bat.add_argument("--holdout-start", default="2019-01-01")
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     human = sub.add_parser("human", help="Log a discretionary card (model_id=human); not used in fit")
     human.add_argument("--region", default="global")
     human.add_argument("--mag", type=float, default=7.0)
-    human.add_argument("--horizon", type=int, default=7)
+    human.add_argument("--horizon", type=int, default=30)
     human.add_argument("--kind", default="probability", choices=["probability", "alarm"])
     human.add_argument("--value", type=float, required=True)
     human.add_argument("--note", default="")
@@ -68,13 +68,20 @@ def main(argv: list[str] | None = None) -> int:
     eepas = sub.add_parser("eepas", help="Paper-score the 90-day EEPAS foil vs ETAS; no issued p")
     eepas.add_argument("--train-end", default="2018-12-31")
     eepas.add_argument("--holdout-start", default="2019-01-01")
+    widenet = sub.add_parser("widenet", help="Japan+Chile 7-day M5+ foil; no issued p")
+    widenet.add_argument("--train-end", default="2018-12-31")
+    widenet.add_argument("--holdout-start", default="2019-01-01")
+    sub.add_parser("das-foil", help="Record local SISSLE Haast clips; no issued p")
 
     stack = sub.add_parser("issued-stack", help="Paper-score issued fusion vs ETAS; no cards")
     stack.add_argument("--holdout-start", default="2019-01-01")
-    stack.add_argument("--horizon", type=int, nargs="*", default=[1, 7, 90])
+    stack.add_argument("--horizon", type=int, nargs="*", default=[1, 7, 30, 90])
 
     watch = sub.add_parser("watchdog", help="Source freshness as-of a morning")
     watch.add_argument("--as-of", default=None, help="UTC timestamp; default is now")
+
+    sources = sub.add_parser("sources", help="Coverage and freshness of every ingested source")
+    sources.add_argument("--as-of", default=None, help="UTC timestamp; default is now")
 
     sub.add_parser("registry", help="Pin or list the issued model versions")
 
@@ -84,7 +91,18 @@ def main(argv: list[str] | None = None) -> int:
     hunt.add_argument(
         "--fresh",
         action="store_true",
-        help="Hunt leftover knobs vs a declustered big-quake hit (no aftershock residual)",
+        default=True,
+        help="Hunt vs a first large quake after aftershock swarms are stripped (default)",
+    )
+    hunt.add_argument(
+        "--etas-residual",
+        action="store_true",
+        help="Old hunt: non-catalog knobs vs what the aftershock model leaves behind",
+    )
+    hunt.add_argument(
+        "--sequence",
+        action="store_true",
+        help="Hunt sequence/foreshock catalog columns vs a first large quake; never issued p",
     )
 
     back = sub.add_parser("backtest", help="Replay a knob on weeks that already closed")
@@ -102,26 +120,46 @@ def main(argv: list[str] | None = None) -> int:
 
     mainshock = sub.add_parser(
         "mainshock",
-        help="Leftover AI call for a fresh big quake (not aftershocks); backtest later years",
+        help="Fresh-shock model call for a new big quake (not aftershocks); backtest later years",
     )
     mainshock.add_argument("--train-end", default="2018-12-31")
     mainshock.add_argument("--holdout-start", default="2019-01-01")
-    mainshock.add_argument(
+    mainshock_mode = mainshock.add_mutually_exclusive_group()
+    mainshock_mode.add_argument(
         "--last-week",
         action="store_true",
-        help="Only score leftover from the last 7 days of leftover sources (does not rewrite issued p)",
+        help="Only score the last 7 days of non-catalog sources (does not rewrite issued p)",
     )
+    mainshock_mode.add_argument(
+        "--locked-thin",
+        action="store_true",
+        help="Paper-score the frozen pre-registered source list (does not rewrite issued p)",
+    )
+
+    after = sub.add_parser(
+        "aftershock",
+        help="Score the aftershock (ETAS) track on its own question; never issued p",
+    )
+    after.add_argument("--train-end", default="2018-12-31")
+    after.add_argument("--holdout-start", default="2019-01-01")
+
+    csep = sub.add_parser(
+        "csep",
+        help="CSEP N/L/T/S + Molchan tests on the issued fresh-shock daily p; never issued p",
+    )
+    csep.add_argument("--train-end", default="2018-12-31")
+    csep.add_argument("--holdout-start", default="2019-01-01")
 
     foreshock = sub.add_parser(
         "foreshock",
-        help="Catalog precursor: foreshock → fresh mainshock; never leftover, never issued p",
+        help="Catalog precursor: foreshock → fresh mainshock; never non-catalog, never issued p",
     )
     foreshock.add_argument("--train-end", default="2018-12-31")
     foreshock.add_argument("--holdout-start", default="2019-01-01")
 
     probe = sub.add_parser(
         "probe",
-        help="Timeshift the leftover M8 hint and test whether leftover can name the box",
+        help="Timeshift the M8 hint and test whether the model can name the box",
     )
     probe.add_argument("--train-end", default="2018-12-31")
     probe.add_argument("--holdout-start", default="2019-01-01")
@@ -130,7 +168,28 @@ def main(argv: list[str] | None = None) -> int:
     xfer.add_argument("--train-end", default="2018-12-31")
     xfer.add_argument("--holdout-start", default="2019-01-01")
 
-    learn = sub.add_parser("learn", help="Brain + transfer + promote gate; never writes issued p")
+    leftover = sub.add_parser(
+        "leftover",
+        help="Climate + schedule + leftover of other sources; never writes issued p",
+    )
+    leftover.add_argument("--train-end", default="2018-12-31")
+    leftover.add_argument("--holdout-start", default="2019-01-01")
+
+    leftover_look = sub.add_parser(
+        "leftover-look",
+        help="Last 40 leftover-lookalike mornings and which-box-next; never issued p",
+    )
+    leftover_look.add_argument("--train-end", default="2018-12-31")
+    leftover_look.add_argument("--holdout-start", default="2019-01-01")
+
+    circus = sub.add_parser(
+        "circus",
+        help="Veto leftover if it tracks weekday/payday/HAARP/wiki foils; never issued p",
+    )
+    circus.add_argument("--train-end", default="2018-12-31")
+    circus.add_argument("--holdout-start", default="2019-01-01")
+
+    learn = sub.add_parser("learn", help="Brain + leftover + circus + transfer + promote; never writes issued p")
     learn.add_argument("--train-end", default="2018-12-31")
     learn.add_argument("--holdout-start", default="2019-01-01")
 
@@ -143,8 +202,29 @@ def main(argv: list[str] | None = None) -> int:
     pipe.add_argument("--minmag", type=float, default=4.5)
     pipe.add_argument("--train-end", default="2018-12-31")
     pipe.add_argument("--predict-start", default=None)
-    pipe.add_argument("--horizon", type=int, default=7)
+    pipe.add_argument("--horizon", type=int, default=30)
     pipe.add_argument("--skip-ingest", action="store_true")
+    pipe.add_argument(
+        "--hunt",
+        action="store_true",
+        help="Also run the weekly hunt scan and hunt-driven backtest",
+    )
+
+    analog = sub.add_parser(
+        "analog",
+        help="Earth-state anomaly, historical analogs, and fault-network stress; never issued p",
+    )
+    analog.add_argument("--train-end", default="2018-12-31")
+    analog.add_argument("--holdout-start", default="2019-01-01")
+    analog.add_argument("--no-write-features", action="store_true")
+    anomaly = sub.add_parser("anomaly", help="Same as analog (Earth-state suite)")
+    anomaly.add_argument("--train-end", default="2018-12-31")
+    anomaly.add_argument("--holdout-start", default="2019-01-01")
+    anomaly.add_argument("--no-write-features", action="store_true")
+    graph = sub.add_parser("graph", help="Same as analog (Earth-state suite)")
+    graph.add_argument("--train-end", default="2018-12-31")
+    graph.add_argument("--holdout-start", default="2019-01-01")
+    graph.add_argument("--no-write-features", action="store_true")
 
     lab = sub.add_parser("serve", help="Open the local lab UI (ledger, scoreboard, map)")
     lab.add_argument("--host", default="127.0.0.1")
@@ -157,13 +237,15 @@ def main(argv: list[str] | None = None) -> int:
             WAVE1_SOURCES,
             WAVE2_SOURCES,
             WAVE3_SOURCES,
+            WAVE4_SOURCES,
             ingest_wave1,
             ingest_wave2,
             ingest_wave3,
+            ingest_wave4,
         )
 
         only = args.only
-        known = set(WAVE1_SOURCES) | set(WAVE2_SOURCES) | set(WAVE3_SOURCES)
+        known = set(WAVE1_SOURCES) | set(WAVE2_SOURCES) | set(WAVE3_SOURCES) | set(WAVE4_SOURCES)
         if only and only not in known:
             print(f"unknown source {only}; known: {', '.join(sorted(known))}")
             return 2
@@ -182,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
             written.update(ingest_wave2(_ts(args.start), _ts(args.end), only=only))
         if args.wave in {"3", "all"} and (only is None or only in WAVE3_SOURCES):
             written.update(ingest_wave3(_ts(args.start), _ts(args.end), only=only))
+        if args.wave in {"4", "all"} and (only is None or only in WAVE4_SOURCES):
+            written.update(ingest_wave4(_ts(args.start), _ts(args.end), only=only))
         if only and not written:
             print(f"ingest wrote nothing for {only}")
             return 2
@@ -292,6 +376,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2))
         return 0 if report["ok"] else 2
 
+    if args.cmd == "sources":
+        from eqpred.ingest.watchdog import coverage_report
+
+        as_of = _ts(args.as_of) if args.as_of else datetime.now(timezone.utc)
+        report = coverage_report(as_of)
+        print(json.dumps(report, indent=2))
+        return 0 if report["ok"] and not report["missing"] else 2
+
     if args.cmd == "battery":
         from eqpred.eval.battery import run_battery
 
@@ -329,6 +421,22 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({k: report[k] for k in report if k != "regions"}, indent=2, default=str))
         return 0
 
+    if args.cmd == "widenet":
+        from eqpred.eval.widenet import run_widenet
+
+        report = run_widenet(train_end=args.train_end, holdout_start=args.holdout_start)
+        print(report.get("note", ""))
+        print(json.dumps({k: report[k] for k in report if k != "clips"}, indent=2, default=str))
+        return 0
+
+    if args.cmd == "das-foil":
+        from eqpred.eval.das_foil import run_das_foil
+
+        report = run_das_foil()
+        print(report.get("note", ""))
+        print(json.dumps({k: report[k] for k in report if k != "clips"}, indent=2, default=str))
+        return 0
+
     if args.cmd == "issued-stack":
         from eqpred.eval.issued_stack import run_issued_stacks
 
@@ -347,7 +455,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "hunt":
         from eqpred.eval.hunt import run_hunt
 
-        report = run_hunt(train_end=args.train_end, holdout_start=args.holdout_start, fresh=args.fresh)
+        report = run_hunt(
+            train_end=args.train_end,
+            holdout_start=args.holdout_start,
+            fresh=not args.etas_residual,
+            sequence=args.sequence,
+        )
         print(
             json.dumps(
                 {
@@ -356,8 +469,26 @@ def main(argv: list[str] | None = None) -> int:
                     "n_discovered": report["n_discovered"],
                     "n_confirmed": report["n_confirmed"],
                     "n_confirmed_unconventional": report["n_confirmed_unconventional"],
+                    "n_confirmed_sequence": report.get("n_confirmed_sequence"),
+                    "sequence": report.get("sequence"),
+                    "writes_issued_p": report.get("writes_issued_p"),
+                    "looks_at_all_sources": report.get("looks_at_all_sources"),
                     "family_counts": report["family_counts"],
                     "confirmed": report["confirmed"][:40],
+                    "honest": (
+                        {
+                            "n_knobs": report["honest"]["n_knobs"],
+                            "n_tests": report["honest"]["n_tests"],
+                            "n_confirmed": report["honest"]["n_confirmed"],
+                            "n_beats_climate": report["honest"]["n_beats_climate"],
+                            "n_confirmed_family": report["honest"]["n_confirmed_family"],
+                            "n_confirmed_quiet": report["honest"]["n_confirmed_quiet"],
+                            "n_confirmed_m8": report["honest"]["n_confirmed_m8"],
+                            "writes_issued_p": report["honest"]["writes_issued_p"],
+                        }
+                        if report.get("honest")
+                        else None
+                    ),
                     "note": report["note"],
                 },
                 indent=2,
@@ -391,12 +522,49 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "mainshock":
-        from eqpred.eval.mainshock import run_last_week_mainshock, run_mainshock
+        from eqpred.eval.mainshock import (
+            run_last_week_mainshock,
+            run_locked_thin_mainshock,
+            run_mainshock,
+        )
+
+        if args.locked_thin:
+            report = run_locked_thin_mainshock(train_end=args.train_end, holdout_start=args.holdout_start)
+            locked = report.get("locked_thin") or {}
+            print(locked.get("note") or report.get("note") or "Locked thin model scored.")
+            print(
+                json.dumps(
+                    {
+                        "writes_issued_p": False,
+                        "mode": "locked_thin",
+                        "n_features": locked.get("n_features"),
+                        "n_locked": locked.get("n_locked"),
+                        "n_beats_climatology": locked.get("n_beats_climatology"),
+                        "week": locked.get("week"),
+                        "regions": [
+                            {
+                                "label": r["label"],
+                                "magnitude_min": r["magnitude_min"],
+                                "brier": r.get("brier"),
+                                "climatology_brier": r.get("climatology_brier"),
+                                "brier_p_holm": r.get("brier_p_holm"),
+                                "recipe": r.get("recipe"),
+                                "beats_climatology": r.get("beats_climatology"),
+                                "fresh_raw_p": (r.get("this_week") or {}).get("fresh_raw_p"),
+                            }
+                            for r in locked.get("regions") or []
+                        ],
+                    },
+                    indent=2,
+                    default=str,
+                )
+            )
+            return 0
 
         if args.last_week:
             report = run_last_week_mainshock(train_end=args.train_end, holdout_start=args.holdout_start)
             last = report.get("last_week") or {}
-            print(last.get("note") or report.get("note") or "Last-week leftover scored.")
+            print(last.get("note") or report.get("note") or "Last-week model scored.")
             print(
                 json.dumps(
                     {
@@ -412,7 +580,7 @@ def main(argv: list[str] | None = None) -> int:
                                 "brier": r.get("brier"),
                                 "climatology_brier": r.get("climatology_brier"),
                                 "recipe": r.get("recipe"),
-                                "leftover_raw_p": (r.get("this_week") or {}).get("leftover_raw_p"),
+                                "fresh_raw_p": (r.get("this_week") or {}).get("fresh_raw_p"),
                             }
                             for r in last.get("regions") or []
                         ],
@@ -431,6 +599,8 @@ def main(argv: list[str] | None = None) -> int:
                     "writes_issued_p": report["writes_issued_p"],
                     "n_features": report["n_features"],
                     "n_beats_climatology": report["n_beats_climatology"],
+                    "score_kind": report.get("score_kind"),
+                    "evaluation": report.get("evaluation"),
                     "experiments": [
                         {
                             "id": exp["id"],
@@ -447,6 +617,24 @@ def main(argv: list[str] | None = None) -> int:
                         }
                         for exp in report.get("experiments") or []
                     ],
+                    "shrunk": {
+                        "n_features": (report.get("shrunk") or {}).get("n_features"),
+                        "n_beats_climatology": (report.get("shrunk") or {}).get("n_beats_climatology"),
+                        "writes_issued_p": False,
+                    },
+                    "alpine_sequence": {
+                        "n_features": (report.get("alpine_sequence") or {}).get("n_features"),
+                        "applied": (report.get("alpine_sequence") or {}).get("applied"),
+                        "writes_issued_p": (report.get("alpine_sequence") or {}).get("writes_issued_p"),
+                    },
+                    "method_eval": {
+                        "n_beats_climatology": (report.get("method_eval") or {}).get("n_beats_climatology"),
+                        "writes_issued_p": False,
+                    },
+                    "kermadec_attribution": {
+                        "verdict": (report.get("kermadec_attribution") or {}).get("verdict"),
+                        "writes_issued_p": False,
+                    },
                     "week": report["week"],
                     "regions": [
                         {
@@ -454,6 +642,11 @@ def main(argv: list[str] | None = None) -> int:
                             "magnitude_min": r["magnitude_min"],
                             "brier": r.get("brier"),
                             "climatology_brier": r.get("climatology_brier"),
+                            "brier_p_value": r.get("brier_p_value"),
+                            "brier_p_holm": r.get("brier_p_holm"),
+                            "brier_week": r.get("brier_week"),
+                            "issued_from": r.get("issued_from"),
+                            "n_score": r.get("n_score"),
                             "lift": r.get("lift"),
                             "fresh_rate_holdout": r.get("fresh_rate_holdout"),
                             "raw_rate_holdout": r.get("raw_rate_holdout"),
@@ -463,6 +656,63 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 indent=2,
                 default=str,
+            )
+        )
+        return 0
+
+    if args.cmd == "aftershock":
+        from eqpred.eval.aftershock import run_aftershock
+
+        report = run_aftershock(train_end=args.train_end, holdout_start=args.holdout_start)
+        print(report["note"])
+        print(
+            json.dumps(
+                {
+                    "writes_issued_p": False,
+                    "track": "aftershock_etas",
+                    "issue_day": report.get("issue_day"),
+                    "n_beats_climatology": report.get("n_beats_climatology"),
+                    "week": [
+                        {
+                            "region": w["region"],
+                            "chance_plain": w.get("chance_plain"),
+                            "fresh_chance_plain": w.get("fresh_chance_plain"),
+                        }
+                        for w in report.get("week") or []
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.cmd == "csep":
+        from eqpred.eval.csep import load_csep, run_csep
+
+        existing = load_csep()
+        if existing and existing.get("boxes"):
+            report = existing
+        else:
+            report = run_csep(train_end=args.train_end, holdout_start=args.holdout_start)
+        print(report.get("note") or "")
+        print(
+            json.dumps(
+                {
+                    "writes_issued_p": False,
+                    "horizon_days": report.get("horizon_days"),
+                    "n_pass": report.get("n_pass"),
+                    "n_fail": report.get("n_fail"),
+                    "spatial": (report.get("spatial") or {}).get("plain"),
+                    "boxes": [
+                        {
+                            "region": b.get("region"),
+                            "n_pass": b.get("n_pass"),
+                            "n_fail": b.get("n_fail"),
+                        }
+                        for b in report.get("boxes") or []
+                    ],
+                },
+                indent=2,
             )
         )
         return 0
@@ -525,7 +775,7 @@ def main(argv: list[str] | None = None) -> int:
                     "where_issued": {
                         k: report["where_issued"].get(k)
                         for k in (
-                            "leftover_acc",
+                            "fresh_acc",
                             "majority_acc",
                             "majority_label",
                             "beats_majority",
@@ -535,7 +785,7 @@ def main(argv: list[str] | None = None) -> int:
                     "where_transfer": {
                         k: report["where_transfer"].get(k)
                         for k in (
-                            "leftover_acc",
+                            "fresh_acc",
                             "majority_acc",
                             "majority_label",
                             "beats_majority",
@@ -558,10 +808,26 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "writes_issued_p": report["writes_issued_p"],
+                    "looks_at_all_sources": report.get("looks_at_all_sources"),
                     "n_features": report["n_features"],
                     "locked_lift": report["locked_lift"],
                     "locked_brier": report["locked_brier"],
                     "locked_etas_brier": report["locked_etas_brier"],
+                    "locked_climate_brier": report.get("locked_climate_brier"),
+                    "locked_beats_climate": report.get("locked_beats_climate"),
+                    "recent": {
+                        "n_features": (report.get("recent") or {}).get("n_features"),
+                        "locked_brier": (report.get("recent") or {}).get("locked_brier"),
+                        "locked_climate_brier": (report.get("recent") or {}).get("locked_climate_brier"),
+                    },
+                    "quiet_start": {
+                        "locked_lift": (report.get("quiet_start") or {}).get("locked_lift"),
+                        "locked_brier": (report.get("quiet_start") or {}).get("locked_brier"),
+                    },
+                    "rare": {
+                        "locked_brier": (report.get("rare") or {}).get("locked_brier"),
+                        "locked_climate_brier": (report.get("rare") or {}).get("locked_climate_brier"),
+                    },
                     "improved": report["improved"],
                     "walk_forward": {
                         "n_folds": report["walk_forward"]["n_folds"],
@@ -570,6 +836,76 @@ def main(argv: list[str] | None = None) -> int:
                     "connections": report["connections"][:12],
                     "experiments": report["experiments"],
                     "journal_runs": report["journal_runs"],
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return 0
+
+    if args.cmd == "leftover":
+        from eqpred.eval.leftover import run_leftover
+
+        report = run_leftover(train_end=args.train_end, holdout_start=args.holdout_start)
+        print(report["note"])
+        print(
+            json.dumps(
+                {
+                    "writes_issued_p": report["writes_issued_p"],
+                    "n_leftover_columns": report.get("n_leftover_columns"),
+                    "n_beats_climate": report.get("n_beats_climate"),
+                    "n_beats_schedule": report.get("n_beats_schedule"),
+                    "attached_to_mainshock": report.get("attached_to_mainshock"),
+                    "week": [
+                        {
+                            "label": w.get("label"),
+                            "leftover_chance_plain": w.get("leftover_chance_plain"),
+                            "schedule_chance_plain": w.get("schedule_chance_plain"),
+                            "climatology_chance_plain": w.get("climatology_chance_plain"),
+                        }
+                        for w in report.get("week") or []
+                    ],
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return 0
+
+    if args.cmd == "leftover-look":
+        from eqpred.eval.leftover_look import run_leftover_look
+
+        report = run_leftover_look(train_end=args.train_end, holdout_start=args.holdout_start)
+        print(report.get("sentence") or report.get("note"))
+        print(
+            json.dumps(
+                {
+                    "writes_issued_p": report["writes_issued_p"],
+                    "n_analogs": report.get("n_analogs"),
+                    "which_box": report.get("which_box"),
+                    "which_box_label": report.get("which_box_label"),
+                    "which_box_rate": report.get("which_box_rate"),
+                    "box_rates": report.get("box_rates"),
+                    "issue_day": report.get("issue_day"),
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return 0
+
+    if args.cmd == "circus":
+        from eqpred.eval.circus import run_circus
+
+        report = run_circus(train_end=args.train_end, holdout_start=args.holdout_start)
+        print(report["note"])
+        print(
+            json.dumps(
+                {
+                    "writes_issued_p": report["writes_issued_p"],
+                    "pass": report.get("pass"),
+                    "n_fail": report.get("n_fail"),
+                    "foils": report.get("foils"),
                 },
                 indent=2,
                 default=str,
@@ -597,6 +933,8 @@ def main(argv: list[str] | None = None) -> int:
                     "promote": report["promote"],
                     "transfer_beats": report["transfer"].get("n_beats_etas"),
                     "brain_lift": report["brain"].get("locked_lift"),
+                    "leftover_beats_schedule": (report.get("leftover") or {}).get("n_beats_schedule"),
+                    "circus_pass": (report.get("circus") or {}).get("pass"),
                 },
                 indent=2,
                 default=str,
@@ -613,6 +951,42 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "pipeline":
         return _pipeline(args)
+
+    if args.cmd in {"analog", "anomaly", "graph"}:
+        from eqpred.eval.earth_state import run_earth_state
+
+        report = run_earth_state(
+            train_end=args.train_end,
+            holdout_start=args.holdout_start,
+            write_features=not args.no_write_features,
+        )
+        print(report.get("note") or "")
+        print(
+            json.dumps(
+                {
+                    "writes_issued_p": False,
+                    "issue_day": report.get("issue_day"),
+                    "n_state_columns": report.get("n_state_columns"),
+                    "n_beats_climatology": report.get("n_beats_climatology"),
+                    "anomaly": report.get("anomaly"),
+                    "n_analogs": len(report.get("analogs") or []),
+                    "graph_transfer_on": (report.get("graph") or {}).get("transfer_on"),
+                    "regions": [
+                        {
+                            "label": r.get("label"),
+                            "analog_brier": r.get("analog_brier"),
+                            "climatology_brier": r.get("climatology_brier"),
+                            "beats_climatology": r.get("beats_climatology"),
+                            "this_week_analog_p": r.get("this_week_analog_p"),
+                        }
+                        for r in report.get("regions") or []
+                    ],
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return 0
 
     if args.cmd == "serve":
         from eqpred.ui.server import serve
@@ -639,9 +1013,16 @@ def _pipeline(args: argparse.Namespace) -> int:
         return predict_rc
     main(["battery", "--holdout-start", predict_start])
     main(["score"])
+    main(["mainshock", "--train-end", args.train_end, "--holdout-start", predict_start])
+    main(["csep", "--train-end", args.train_end, "--holdout-start", predict_start])
+    main(["aftershock", "--train-end", args.train_end, "--holdout-start", predict_start])
+    main(["eepas", "--train-end", args.train_end, "--holdout-start", predict_start])
+    main(["widenet", "--train-end", args.train_end, "--holdout-start", predict_start])
+    main(["das-foil"])
     main(["strategies", "--holdout-start", predict_start])
-    main(["hunt", "--train-end", args.train_end, "--holdout-start", predict_start])
-    main(["backtest", "--from-hunt", "--train-end", args.train_end, "--holdout-start", predict_start])
+    if args.hunt:
+        main(["hunt", "--train-end", args.train_end, "--holdout-start", predict_start])
+        main(["backtest", "--from-hunt", "--train-end", args.train_end, "--holdout-start", predict_start])
     main(["learn", "--train-end", args.train_end, "--holdout-start", predict_start])
     return 0
 
