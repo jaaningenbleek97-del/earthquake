@@ -1,4 +1,10 @@
-data/
+data/*
+!data/raw/
+data/raw/*
+!data/raw/hikurangi.press/
+data/raw/hikurangi.press/*
+!data/raw/hikurangi.press/Data-20220730T223122Z-001.zip.001
+!data/raw/hikurangi.press/Data-20220730T223122Z-001.zip.002
 .env
 .venv/
 venv/
