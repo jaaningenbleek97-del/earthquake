@@ -938,15 +938,16 @@ function mainshockFocusHtml(data) {
   const short = data.short_horizons || snap.short_horizons || [];
   const three = short.filter((row) => Number(row.horizon_days) === 3);
   const cards = three.map((w) => `<article class="call-card${w.region === "global" ? " global" : ""}">
-      <p class="where">Next 3 days · frozen · ${w.label} M≥${w.magnitude_min}</p>
-      <div class="chance">${w.chance_plain || "—"}<small>scored card · votes stay locked</small></div>
+      <p class="where">Next 3 days · ${w.label} M≥${w.magnitude_min}</p>
+      <div class="chance">${w.chance_plain || "—"}<small>every reading can move this</small></div>
       <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
+      ${w.group_plain ? `<p class="etas">${w.group_plain}</p>` : ""}
       ${w.agreement_plain ? `<p class="etas">${w.agreement_plain}</p>` : ""}
       ${voteBits(w)}
     </article>`).join("");
   const exam = data.agreement_exam || snap.agreement_exam;
   const threeBlock = cards
-    ? `<article class="card head-card fresh-week"><h3>Next 3 days · frozen</h3><p class="hint">These votes are frozen so new mornings can be scored. They do not change the 30-day card.</p>${exam?.plain ? `<p class="hint">${exam.plain}</p>` : ""}<div class="grid heads fresh-attempt-grid">${cards}</div></article>`
+    ? `<article class="card head-card fresh-week"><h3>Next 3 days</h3><p class="hint">Every reading keeps its own value from the early years. Copies of the same measurement are added together and stop at 3 points for a solar-watch measurement and 1 point for any other. This does not change the 30-day card.</p>${exam?.plain ? `<p class="hint">${exam.plain}</p>` : ""}<div class="grid heads fresh-attempt-grid">${cards}</div></article>`
     : "";
   const draft = data.draft || snap.draft;
   const voteDraft = data.vote_draft || snap.vote_draft;
@@ -1446,13 +1447,13 @@ function oddBoxHtml(odd) {
 }
 
 function voteBits(w) {
-  if (w.issued_from !== "votes") return "";
+  if (w.issued_from !== "votes" && w.issued_from !== "open") return "";
   const up = (w.votes_up || []).map((v) => `${v.family} ${v.points_plain}`).join(", ");
   const down = (w.votes_down || []).map((v) => `${v.family} ${v.points_plain}`).join(", ");
   const swarm = w.swarm
     ? `<p class="etas">${w.swarm_plain}</p>`
     : "";
-  return `<p class="etas">${w.lineup_plain || ""}</p>${up ? `<p class="why">Up: ${up}.</p>` : ""}${down ? `<p class="why">Down: ${down}.</p>` : ""}${swarm}<p class="etas">Weights are frozen for scoring. The working model can still change and does not replace this card.</p>`;
+  return `<p class="etas">${w.lineup_plain || ""}</p>${up ? `<p class="why">Up: ${up}.</p>` : ""}${down ? `<p class="why">Down: ${down}.</p>` : ""}${swarm}<p class="etas">${w.issued_from === "open" ? "Every reading keeps its own value from the early years. Copies of the same measurement are added together and stop at 3 points for a solar-watch measurement and 1 point for any other." : "Weights are frozen for scoring. The working model can still change and does not replace this card."}</p>`;
 }
 
 function shortHorizonCardsHtml(pack) {
@@ -1463,12 +1464,12 @@ function shortHorizonCardsHtml(pack) {
     if (!week.length) return "";
     const cards = week.map((w) => `<article class="call-card${w.region === "global" ? " global" : ""}">
       <p class="where">Next ${horizon} days · ${w.label} M≥${w.magnitude_min}</p>
-      <div class="chance">${w.chance_plain || "—"}<small>${horizon === 3 && w.issued_from === "votes" ? "votes added up" : "beside the 30-day card"}</small></div>
+      <div class="chance">${w.chance_plain || "—"}<small>${horizon === 3 && (w.issued_from === "votes" || w.issued_from === "open") ? (w.issued_from === "open" ? "every reading can move this" : "votes added up") : "beside the 30-day card"}</small></div>
       <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
-      ${horizon === 3 && w.agreement_plain ? `<p class="etas">${w.agreement_plain}</p>` : ""}
-      ${horizon === 3 && w.issued_from === "votes" ? voteBits(w) : `<p class="etas">${w.beats_climatology ? "Beat the five-year rate on later mornings." : "Has not beaten the five-year rate on later mornings."}</p>`}
+      ${horizon === 3 && w.group_plain ? `<p class="etas">${w.group_plain}</p>` : ""}
+      ${horizon === 3 && (w.issued_from === "votes" || w.issued_from === "open") ? voteBits(w) : `<p class="etas">${w.beats_climatology ? "Beat the five-year rate on later mornings." : "Has not beaten the five-year rate on later mornings."}</p>`}
     </article>`).join("");
-    return `<article class="card head-card fresh-week"><h3>Next ${horizon} days${horizon === 3 ? " · frozen" : ""}</h3><p class="hint">${horizon === 3 ? "Frozen votes. New mornings are scored with these weights. This does not change the 30-day card." : "Same recipe as the published card, asking about a shorter window. This does not replace the 30-day chance."}</p><div class="grid heads fresh-attempt-grid">${cards}</div></article>`;
+    return `<article class="card head-card fresh-week"><h3>Next ${horizon} days</h3><p class="hint">${horizon === 3 ? "Every reading keeps its own value from the early years. Copies of the same measurement are added together and stop at 3 points for a solar-watch measurement and 1 point for any other. This does not change the 30-day card." : "Same recipe as the published card, asking about a shorter window. This does not replace the 30-day chance."}</p><div class="grid heads fresh-attempt-grid">${cards}</div></article>`;
   }).join("");
   return blocks;
 }

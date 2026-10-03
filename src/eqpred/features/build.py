@@ -407,13 +407,30 @@ def _join_wave2(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFram
 
 
 def _nz_gnss_mean(frame: pd.DataFrame) -> pd.DataFrame:
-    from eqpred.ingest.gnss import NZ_SITES
+    from eqpred.ingest.gnss import CHILE_SITES, JAPAN_SITES, NZ_SITES
 
     work = frame
     if "site" in frame.columns:
-        work = frame.loc[frame["site"].isin(NZ_SITES)]
+        abroad = {code.upper() for code in (*JAPAN_SITES, *CHILE_SITES)}
+        sites = frame["site"].astype(str)
+        work = frame.loc[~sites.str.upper().isin(abroad)].copy()
         if work.empty:
             return frame
+        labels = work["site"].astype(str)
+        per = work.loc[~labels.str.lower().eq("nzmean")]
+        legacy = work.loc[labels.str.lower().eq("nzmean")]
+        if not per.empty:
+            short = per.loc[per["site"].astype(str).str.upper().isin(NZ_SITES)]
+            chosen = short if not short.empty else per
+            if not legacy.empty:
+                chosen_days = set(parse_utc(chosen["observed_at"]).dt.floor("D"))
+                legacy_days = parse_utc(legacy["observed_at"]).dt.floor("D")
+                legacy = legacy.loc[~legacy_days.isin(chosen_days)]
+                work = pd.concat([legacy, chosen], ignore_index=True)
+            else:
+                work = chosen
+        elif not legacy.empty:
+            work = legacy
     if "site" not in frame.columns:
         return work
     cols = {
@@ -434,7 +451,8 @@ def _nz_gnss_mean(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _join_gnss(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
-    from eqpred.ingest.gnss import SLOW_SLIP_SITES
+    from eqpred.features.gnss_slip import gnss_slip_columns
+    from eqpred.ingest.gnss import SITES, SLOW_SLIP_SITES
 
     geonet = try_latest_raw("geonet.gnss", root)
     ngl = try_latest_raw("ngl.gnss", root)
@@ -450,8 +468,11 @@ def _join_gnss(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame
             feat["gnss_east_7d"] = feat["gnss_east_mm"].diff(7)
 
     if ngl.empty or "site" not in ngl.columns:
-        return gnss_strain_columns(feat)
+        return gnss_slip_columns(gnss_strain_columns(feat), root)
+    keep_sites = {code.upper() for code in (*SITES, *SLOW_SLIP_SITES)}
     for site, part in ngl.groupby("site"):
+        if str(site).upper() not in keep_sites:
+            continue
         slug = str(site).lower()
         cols = [c for c in ("east_mm", "north_mm", "vert_mm") if c in part.columns]
         if not cols:
@@ -462,7 +483,7 @@ def _join_gnss(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame
         if slug.upper() in SLOW_SLIP_SITES and f"gnss_{slug}_east_mm" in feat.columns:
             feat[f"gnss_{slug}_slowslip_30d"] = feat[f"gnss_{slug}_east_mm"].diff(30)
     feat = feat.copy()
-    return gnss_strain_columns(feat)
+    return gnss_slip_columns(gnss_strain_columns(feat), root)
 
 
 def _join_magnet(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:

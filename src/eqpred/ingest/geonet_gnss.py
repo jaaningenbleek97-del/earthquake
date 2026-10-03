@@ -98,44 +98,59 @@ def _tilde_window(site: str, aspect: str, start: datetime, end: datetime) -> lis
     return parse_tilde_json(payload)
 
 
-def pull_geonet_gnss(start: datetime, end: datetime, ingest_run_id: str) -> pd.DataFrame:
-    """Daily NZ GNSS from GeoNet Tilde. Unused on issued p until a head beats ETAS."""
+def pull_geonet_gnss(
+    start: datetime,
+    end: datetime,
+    ingest_run_id: str,
+    sites: tuple[str, ...] | None = None,
+) -> pd.DataFrame:
+    """Daily NZ GNSS from GeoNet Tilde, one row per station. A dead site is skipped."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     if end > now:
         end = now
-    by_day: dict[pd.Timestamp, dict[str, list[float]]] = {}
-    for site in NZ_SITES:
-        got_any = False
+    chosen = sites or NZ_SITES
+    print(f"  GeoNet Tilde {len(chosen)} stations {start.date()} -> {end.date()}", flush=True)
+
+    def _one(site: str) -> list[dict]:
+        rows: list[dict] = []
+        parsed: dict[str, list[tuple[datetime, float]]] = {col: [] for col in ASPECTS.values()}
         for aspect, col in ASPECTS.items():
-            parsed: list[tuple[datetime, float]] = []
+            got: list[tuple[datetime, float]] = []
             for win_start, win_end in _windows(start, end):
-                parsed.extend(_tilde_window(site, aspect, win_start, win_end))
-            if not parsed:
-                continue
-            got_any = True
-            for observed, value in parsed:
+                got.extend(_tilde_window(site, aspect, win_start, win_end))
+            parsed[col] = got
+        if not any(parsed.values()):
+            return rows
+        by_day: dict[pd.Timestamp, dict[str, float]] = {}
+        for col, samples in parsed.items():
+            for observed, value in samples:
                 day = pd.Timestamp(observed).tz_convert("UTC").floor("D")
-                slot = by_day.setdefault(day, {"east_mm": [], "north_mm": [], "vert_mm": []})
-                slot[col].append(value)
-        if not got_any and site == "WGTN":
-            print("    WGTN empty (WGTG is the usual Wellington code)", flush=True)
-    if not by_day:
-        return pd.DataFrame()
-    out = []
-    for day, cols in sorted(by_day.items()):
-        if not cols["east_mm"]:
-            continue
-        observed = day.to_pydatetime()
-        out.append(
-            {
-                "source": SOURCE,
-                "observed_at": iso(observed),
-                "available_at": iso(observed + LATENCY),
-                "license": LICENSE,
-                "ingest_run_id": ingest_run_id,
-                "east_mm": float(sum(cols["east_mm"]) / len(cols["east_mm"])),
-                "north_mm": float(sum(cols["north_mm"]) / len(cols["north_mm"])) if cols["north_mm"] else None,
-                "vert_mm": float(sum(cols["vert_mm"]) / len(cols["vert_mm"])) if cols["vert_mm"] else None,
-            }
-        )
-    return pd.DataFrame(out)
+                by_day.setdefault(day, {})[col] = value
+        for day, cols in by_day.items():
+            if "east_mm" not in cols:
+                continue
+            observed = day.to_pydatetime()
+            rows.append(
+                {
+                    "source": SOURCE,
+                    "observed_at": iso(observed),
+                    "available_at": iso(observed + LATENCY),
+                    "license": LICENSE,
+                    "ingest_run_id": ingest_run_id,
+                    "site": site,
+                    "east_mm": cols.get("east_mm"),
+                    "north_mm": cols.get("north_mm"),
+                    "vert_mm": cols.get("vert_mm"),
+                }
+            )
+        print(f"    {site} {len(rows)} days", flush=True)
+        return rows
+
+    found: list[dict] = []
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(_one, site) for site in chosen]
+        for fut in as_completed(futures):
+            found.extend(fut.result())
+    return pd.DataFrame(found)

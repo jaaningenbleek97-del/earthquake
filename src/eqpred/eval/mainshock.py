@@ -2257,11 +2257,11 @@ def _short_horizon_cards(
     catalog_end: pd.Timestamp,
     root: Path | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """7-day and 3-day chances beside the 30-day card. The 3-day votes stay frozen."""
+    """7-day and 3-day chances beside the 30-day card. The 3-day card lets every reading move it."""
     rows: list[dict[str, Any]] = []
     draft: dict[str, Any] = {
         "writes_issued_p": False,
-        "note": "Working 3-day model. It does not replace the frozen card we score.",
+        "note": "The 3-day card is open. Every reading can move it. It does not replace the 30-day card.",
         "week": [],
     }
     latest = len(days) - 1
@@ -2312,14 +2312,13 @@ def _short_horizon_cards(
                     "beside_30_day": True,
                 }
             )
-    from eqpred.eval.lineup import three_day_vote_fit
-    from eqpred.eval.vote_freeze import hold_vote_cards
+    from eqpred.eval.lineup import open_three_day_rows
 
     vote_closed = np.asarray(days + pd.Timedelta(days=3) <= catalog_end)
     vote_train, vote_hold = purged_train_hold(
         days, vote_closed, train_end, holdout_start, purge=3
     )
-    fit = three_day_vote_fit(
+    voted = open_three_day_rows(
         design=design,
         catalog=catalog,
         days=days,
@@ -2327,14 +2326,13 @@ def _short_horizon_cards(
         hold_mask=vote_hold,
         horizon=3,
     )
-    voted, draft = hold_vote_cards(
-        fit,
-        design=design,
-        catalog=catalog,
-        days=days,
-        hold_mask=vote_hold,
-        root=root,
-    )
+    draft = {
+        "writes_issued_p": False,
+        "horizon_days": 3,
+        "same_as_frozen": False,
+        "note": "The 3-day card is open. Every reading can move it. It does not replace the 30-day card.",
+        "week": voted,
+    }
     if voted:
         rows = [row for row in rows if int(row.get("horizon_days") or 0) != 3] + voted
     return rows, draft

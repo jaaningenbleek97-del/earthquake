@@ -1,8 +1,58 @@
 import numpy as np
+import pandas as pd
 
 from eqpred.eval.explain import furthest_above_rate, neighborhood_from_ref, story_plain
-from eqpred.eval.lineup import watch_agreement
+from eqpred.eval.lineup import (
+    OTHER_CAP,
+    WATCH_CAP,
+    _measurement_group,
+    _motion_base,
+    _raw_scale,
+    _reading_groups,
+    _share_ceiling,
+    vote_cap,
+    watch_agreement,
+)
 from eqpred.eval.mainshock import _BlankAwareScaler, _SitOutScaler
+
+
+def test_extra_slip_removes_the_steady_plate_speed():
+    from eqpred.features.gnss_slip import extra_slip, known_plate_rate
+
+    position = np.arange(10, dtype=float) * 10.0
+    rate = np.full(10, 365.25)
+    extra = extra_slip(position, rate, 7)
+    # 70 mm moved, plate speed accounts for 7 mm.
+    assert abs(float(extra[7]) - 63.0) < 1e-6
+    assert np.isnan(extra[3])
+    published = np.full(12, np.nan)
+    published[10:] = 1.0
+    steady = known_plate_rate(np.arange(12, dtype=float), published, lookback=4)
+    assert abs(float(steady[6]) - 365.25) < 1e-6
+    assert float(steady[10]) == 1.0
+
+
+def test_geonet_tail_stays_off_nevada_columns(tmp_path):
+    from eqpred.features.gnss_slip import _geonet_tail
+
+    days = pd.date_range("2020-01-01", periods=5, tz="UTC")
+    columns = _geonet_tail(days, tmp_path)
+    assert set(columns) == {
+        "geonet_nz_east_mm",
+        "geonet_nz_north_mm",
+        "geonet_nz_east_7d",
+        "geonet_nz_north_7d",
+        "geonet_nzmean_east_7d",
+        "geonet_nzmean_north_7d",
+    }
+    assert all(not name.startswith("gnss_") for name in columns)
+    groups = dict(_reading_groups(["hydro_gwet__lag0", "hydro_gwet__lag7", "solar_kp"]))
+    assert groups["hydro_gwet"] == [0, 1]
+    assert groups["solar_kp"] == [2]
+    z = np.linspace(-2.0, 2.0, 200)
+    roll = np.full(200, 0.1)
+    hits = np.clip(roll + 0.05 * z, 0.0, 1.0)
+    assert abs(_raw_scale(z, hits, roll, np.ones(200, dtype=bool)) - 0.05) < 0.02
 
 
 def test_a_blank_column_has_no_flag_and_a_real_zero_still_differs():
@@ -62,3 +112,21 @@ def test_the_story_follows_the_lift_not_the_larger_chance():
     )
     assert "furthest above its usual rate" in happened
     assert "had not agreed" in happened
+
+
+def test_copies_of_one_measurement_share_a_ceiling():
+    assert _measurement_group("gnss_auck_east_mm") == _measurement_group("gnss_wgtn_north_mm") == "GPS positions"
+    assert _measurement_group("goes_proton_10mev") == _measurement_group("goes_proton_10mev_max7")
+    assert _measurement_group("neutron_domc_count") == _measurement_group("neutron_domc_count_min7")
+    assert _measurement_group("gnss_auck_east_extra_7d") == "extra GPS motion"
+    assert _motion_base("gnss_strain_hikurangi_wide_shear_30d")
+    assert vote_cap("solar") == WATCH_CAP
+    assert vote_cap("wave2") == OTHER_CAP
+    shared, total = _share_ceiling(
+        [np.array([0.02, 0.004]), np.array([0.02, 0.004]), np.array([0.02, np.nan])],
+        0.01,
+    )
+    assert abs(float(total[0]) - 0.01) < 1e-9
+    assert abs(float(shared[0][0]) - 0.01 / 3) < 1e-9
+    assert abs(float(total[1]) - 0.008) < 1e-9
+    assert shared[2][1] == 0.0

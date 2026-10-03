@@ -63,6 +63,7 @@ WAVE2_SOURCES = (
     "geonet.fdsn",
     "geonet.gnss",
     "ngl.gnss",
+    "ngl.midas",
     "igs.tec",
     "copernicus.era5",
     "intermagnet.gin",
@@ -474,12 +475,27 @@ def ingest_wave2(
 
     if _wanted("geonet.gnss", only):
         print("ingest GeoNet Tilde GNSS (NZ sites)")
+        existing = try_latest_raw("geonet.gnss", root)
+        if existing is not None and not existing.empty and "site" not in existing.columns:
+            existing = existing.copy()
+            existing["site"] = "nzmean"
+        from eqpred.ingest.gnss import CHILE_SITES, JAPAN_SITES
+
+        ngl = try_latest_raw("ngl.gnss", root)
+        sites = None
+        if ngl is not None and not ngl.empty and "site" in ngl.columns:
+            abroad = {code.upper() for code in (*JAPAN_SITES, *CHILE_SITES)}
+            sites = tuple(
+                code
+                for code in sorted(ngl["site"].astype(str).str.upper().unique())
+                if code not in abroad
+            )
         try:
-            fits = pull_geonet_gnss(start, end, run_id)
+            fits = pull_geonet_gnss(start, end, run_id, sites=sites)
         except Exception as exc:  # noqa: BLE001
             print(f"  geonet.gnss skipped: {exc}")
             fits = pd.DataFrame()
-        fits = merge_daily_frames(try_latest_raw("geonet.gnss", root), fits)
+        fits = merge_keyed_frames(existing, fits, ("observed_at", "site"))
         if not fits.empty:
             written["geonet.gnss"] = _write(fits, dest / "geonet.gnss" / f"{run_id}.parquet")
             print(f"  geonet.gnss {len(fits)} days")
@@ -495,6 +511,19 @@ def ingest_wave2(
         if not gnss.empty:
             written["ngl.gnss"] = _write(gnss, dest / "ngl.gnss" / f"{run_id}.parquet")
             print(f"  ngl.gnss {len(gnss)} site-days")
+
+    if _wanted("ngl.midas", only):
+        print("ingest NGL MIDAS station speeds")
+        from eqpred.ingest.gnss import pull_midas
+
+        try:
+            midas = pull_midas(run_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ngl.midas skipped: {exc}")
+            midas = pd.DataFrame()
+        if not midas.empty:
+            written["ngl.midas"] = _write(midas, dest / "ngl.midas" / f"{run_id}.parquet")
+            print(f"  ngl.midas {len(midas)} stations")
 
     if _wanted("igs.tec", only):
         print("ingest GIM TEC (JPL public weekly, IGS fallback, per-box means)")

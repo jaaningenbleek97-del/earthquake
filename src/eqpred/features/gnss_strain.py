@@ -112,27 +112,23 @@ def _network_strain(
     year_scale = 365.25 / float(days)
     for i in range(days, n):
         ok = np.isfinite(dde[i]) & np.isfinite(ddn[i])
-        if int(ok.sum()) < 2:
+        k = int(ok.sum())
+        if k < 2:
             continue
-        x, y = xy[ok, 0], xy[ok, 1]
-        ue = dde[i, ok] * 1e-3  # metres of displacement
+        x = xy[ok, 0]
+        y = xy[ok, 1]
+        ue = dde[i, ok] * 1e-3
         un = ddn[i, ok] * 1e-3
-        # ue = exx x + exy y ; un = exy x + eyy y
-        a = np.column_stack([x, y, np.zeros(ok.sum()), np.zeros(ok.sum())])
-        # Fit [exx, exy] on east and [exy, eyy] on north jointly:
-        # [x y 0] [exx]   [ue]
-        # [0 x y] [exy] = [un]
-        #         [eyy]
-        rows = []
-        rhs = []
-        for xk, yk, uek, unk in zip(x, y, ue, un, strict=True):
-            rows.append([xk, yk, 0.0])
-            rhs.append(uek)
-            rows.append([0.0, xk, yk])
-            rhs.append(unk)
-        g = np.asarray(rows, dtype=float)
+        g = np.zeros((2 * k, 3), dtype=float)
+        rhs = np.empty(2 * k, dtype=float)
+        g[0::2, 0] = x
+        g[0::2, 1] = y
+        rhs[0::2] = ue
+        g[1::2, 1] = x
+        g[1::2, 2] = y
+        rhs[1::2] = un
         try:
-            coef, *_ = np.linalg.lstsq(g, np.asarray(rhs, dtype=float), rcond=None)
+            coef, *_ = np.linalg.lstsq(g, rhs, rcond=None)
         except np.linalg.LinAlgError:
             continue
         exx, exy, eyy = float(coef[0]), float(coef[1]), float(coef[2])

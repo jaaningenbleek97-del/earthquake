@@ -208,6 +208,224 @@ def _scale(z: np.ndarray, hits: np.ndarray, roll: np.ndarray, fit_mask: np.ndarr
     return float(scale * shrink)
 
 
+def _raw_scale(z: np.ndarray, hits: np.ndarray, roll: np.ndarray, fit_mask: np.ndarray) -> float:
+    """Uncapped points per standard score, from the early years only. No shrink."""
+    ok = np.asarray(fit_mask, dtype=bool) & np.isfinite(z) & np.isfinite(hits) & np.isfinite(roll)
+    n = int(ok.sum())
+    if n < 20:
+        return 0.0
+    resid = hits[ok] - roll[ok]
+    zz = z[ok] - float(np.mean(z[ok]))
+    var = float(np.mean(zz * zz))
+    if var < 1e-12:
+        return 0.0
+    scale = float(np.mean(zz * resid) / var)
+    return scale if np.isfinite(scale) else 0.0
+
+
+def _motion_base(name: str) -> bool:
+    base = str(name).split("__lag", 1)[0]
+    return "_extra_" in base or "_wide_" in base or base.startswith("geonet_")
+
+
+def _measurement_group(name: str) -> str:
+    """Copies of one physical measurement. They share one ceiling."""
+    from eqpred.eval.hunt import driver_family
+
+    base = str(name).split("__lag", 1)[0]
+    if _motion_base(base):
+        return "extra GPS motion"
+    low = base.lower()
+    if low.startswith(("goes_proton", "proton_")):
+        return "solar protons"
+    if low.startswith("neutron"):
+        return "neutrons"
+    if low.startswith("grace_"):
+        return "GRACE water"
+    if low.startswith(("so2_", "volcano_")):
+        return "volcano gas"
+    if low.startswith("planet_"):
+        return "planets"
+    if low.startswith(("lunar_", "tidal_", "near_new")):
+        return "tides"
+    family = driver_family(low)
+    if family != "wave2":
+        return family
+    head = low.split("_", 1)[0]
+    return {
+        "tec": "ionosphere TEC",
+        "gnss": "GPS positions",
+        "gnssa": "seafloor GPS",
+        "hydro": "soil water",
+        "smap": "soil moisture",
+        "mag": "magnetometer",
+        "ulf": "magnetic pulsations",
+        "strain": "strain",
+        "era5": "weather",
+        "well": "wells",
+        "radon": "radon",
+        "tide": "ocean tide",
+        "cses": "satellite electric field",
+        "roti": "ionosphere ROTI",
+        "scint": "ionosphere scintillation",
+        "dvv": "seismic velocity",
+        "wspr": "radio spots",
+        "dart": "ocean pressure",
+        "swarm": "Swarm satellites",
+        "insar": "InSAR",
+    }.get(head, head)
+
+
+def _share_ceiling(votes: list[np.ndarray], cap: float) -> tuple[list[np.ndarray], np.ndarray]:
+    """Shrink a measurement's readings so their sum stops at `cap`. Each keeps its share."""
+    if not votes:
+        return [], np.zeros(0)
+    filled = [np.where(np.isfinite(vote), vote, 0.0) for vote in votes]
+    total = np.sum(filled, axis=0)
+    factor = np.ones(total.shape, dtype=float)
+    over = np.abs(total) > cap
+    factor[over] = cap / np.abs(total[over])
+    return [vote * factor for vote in filled], total * factor
+
+
+def _reading_groups(names: list[str]) -> list[tuple[str, list[int]]]:
+    """One group per measurement. Lag copies of the same column stay together."""
+    groups: dict[str, list[int]] = {}
+    for idx, name in enumerate(names):
+        groups.setdefault(name.split("__lag", 1)[0], []).append(idx)
+    return list(groups.items())
+
+
+def open_three_day_rows(
+    *,
+    design: tuple[np.ndarray, list[str]],
+    catalog: pd.DataFrame,
+    days: pd.DatetimeIndex,
+    train_mask: np.ndarray,
+    hold_mask: np.ndarray,
+    horizon: int = 3,
+) -> list[dict[str, Any]]:
+    """Every measurement moves the 3-day chance. No skill test. Each vote has a ceiling."""
+    from eqpred.eval.decluster import fresh_hits
+    from eqpred.eval.honest import fit_val_split
+    from eqpred.eval.hunt import driver_family
+    from eqpred.eval.mainshock import (
+        ISSUED_TARGETS,
+        _chance,
+        _place,
+        recent_climate,
+        rolling_climate_series,
+    )
+    from eqpred.eval.skill import skill_beats_climate
+    from eqpred.regions import REGIONS
+
+    raw_x, names = design
+    fit0, _val0 = fit_val_split(days, train_mask, purge=horizon)
+    latest = len(days) - 1
+    groups = _reading_groups(names)
+    rows: list[dict[str, Any]] = []
+    for region_id, mag in ISSUED_TARGETS:
+        hits = fresh_hits(catalog, REGIONS[region_id], mag, days, horizon).astype(float)
+        roll = rolling_climate_series(hits, days, horizon=horizon)
+        climate_series = np.where(np.isfinite(roll), roll, recent_climate(hits, days, train_mask))
+        added = np.zeros(len(days), dtype=float)
+        reports: list[dict[str, Any]] = []
+        grouped: dict[str, list[tuple[str, np.ndarray, np.ndarray]]] = {}
+        n_live = 0
+        n_blank_today = 0
+        for base, idxs in groups:
+            block = raw_x[:, idxs]
+            stats = _column_stats(block, fit0)
+            if all(stat is None for stat in stats):
+                continue
+            z = _z_from_stats(block, stats)
+            scale = _scale(z, hits, roll, fit0)
+            if scale == 0.0:
+                continue
+            n_live += 1
+            vote = scale * z
+            if not np.isfinite(z[latest]):
+                n_blank_today += 1
+            grouped.setdefault(_measurement_group(base), []).append((base, vote, np.isfinite(z)))
+        group_rows: list[dict[str, Any]] = []
+        for label, members in grouped.items():
+            cap = vote_cap(driver_family(members[0][0]))
+            shared, group_total = _share_ceiling([vote for _base, vote, _known in members], cap)
+            added = added + group_total
+            today_group = float(group_total[latest])
+            if abs(today_group) >= 0.0005:
+                group_rows.append(
+                    {
+                        "family": label,
+                        "points": today_group,
+                        "points_plain": _points(today_group),
+                    }
+                )
+            for (base, vote, known), scaled in zip(members, shared, strict=True):
+                if not known[latest]:
+                    continue
+                today_vote = float(scaled[latest])
+                if abs(today_vote) < NOTICE:
+                    continue
+                reports.append(
+                    {
+                        "family": base.replace("_", " "),
+                        "points": today_vote,
+                        "points_plain": _points(today_vote),
+                    }
+                )
+        p_series = np.clip(climate_series + added, 1e-6, 1.0 - 1e-6)
+        p_series = np.clip(np.where(np.isfinite(p_series), p_series, climate_series), 1e-6, 1.0 - 1e-6)
+        climate = float(climate_series[latest]) if np.isfinite(climate_series[latest]) else float("nan")
+        p = float(p_series[latest])
+        exam = skill_beats_climate(p_series[hold_mask], hits[hold_mask], roll[hold_mask])
+        ig = exam.get("information_gain")
+        ig_out = None if ig is None or not np.isfinite(float(ig)) else float(ig)
+        up = [item for item in reports if item["points"] > 0]
+        down = [item for item in reports if item["points"] < 0]
+        up.sort(key=lambda item: -item["points"])
+        down.sort(key=lambda item: item["points"])
+        group_rows.sort(key=lambda item: -abs(item["points"]))
+        group_up = [item for item in group_rows if item["points"] > 0]
+        group_down = [item for item in group_rows if item["points"] < 0]
+        group_bits = [f"{item['family']} {item['points_plain']}" for item in group_rows[:8]]
+        rows.append(
+            {
+                "region": region_id,
+                "label": _place(region_id),
+                "magnitude_min": mag,
+                "horizon_days": horizon,
+                "p": p,
+                "chance_plain": _chance(p),
+                "climatology_p": None if not np.isfinite(climate) else climate,
+                "climatology_chance_plain": _chance(climate),
+                "issue_day": days[latest].date().isoformat(),
+                "information_gain": ig_out,
+                "beats_climatology": ig_out is not None and ig_out >= 0.01,
+                "writes_issued_p": False,
+                "beside_30_day": True,
+                "issued_from": "open",
+                "n_signals": n_live,
+                "lineup_plain": (
+                    f"{len(group_up)} measurements point up, {len(group_down)} point down, "
+                    f"{n_blank_today} readings had no value today. {n_live} readings have a value."
+                ),
+                "votes_up": up[:8],
+                "votes_down": down[:8],
+                "groups_up": group_up[:8],
+                "groups_down": group_down[:8],
+                "swarm": False,
+                "swarm_plain": None,
+                "group_plain": f"Added together: {', '.join(group_bits)}." if group_bits else None,
+            }
+        )
+        print(
+            f"3-day open {region_id} {_chance(p)} typical {_chance(climate)} {rows[-1]['lineup_plain']}",
+            flush=True,
+        )
+    return rows
+
+
 def three_day_vote_rows(
     *,
     design: tuple[np.ndarray, list[str]],

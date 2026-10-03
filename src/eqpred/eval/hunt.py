@@ -106,7 +106,7 @@ def driver_family(column: str) -> str:
         return "slowslip"
     if name.startswith(("sdarn_",)):
         return "radio"
-    if name.startswith(("tec_", "gnss_", "gnssa_", "era5_", "mag_", "ulf_", "strain_", "radon_", "swarm_", "cses_", "tide_", "insar_", "dart_", "well_", "hydro_", "smap_", "roti_", "scint_", "dvv_", "wspr_")):
+    if name.startswith(("tec_", "gnss_", "gnssa_", "geonet_", "era5_", "mag_", "ulf_", "strain_", "radon_", "swarm_", "cses_", "tide_", "insar_", "dart_", "well_", "hydro_", "smap_", "roti_", "scint_", "dvv_", "wspr_")):
         return "wave2"
     if name.startswith("grace_"):
         return "mass"

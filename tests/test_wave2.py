@@ -35,6 +35,20 @@ def test_parse_tenv3_decimal_year():
     assert abs(frame.iloc[0]["east_m"] - 0.012) < 1e-9
 
 
+def test_parse_midas_speeds_are_millimetres_per_year():
+    from eqpred.ingest.gnss import parse_midas
+
+    text = (
+        "AUCK MIDAS5 2010.0000 2020.0000 10.0 100 90 80 "
+        "0.030 0.040 -0.001 0.0002 0.0002 0.0008 0 0 0\n"
+    )
+    frame = parse_midas(text)
+    assert list(frame["site"]) == ["AUCK"]
+    assert abs(frame.iloc[0]["east_mm_yr"] - 30.0) < 1e-6
+    assert abs(frame.iloc[0]["north_mm_yr"] - 40.0) < 1e-6
+    assert frame.iloc[0]["observed_at"].year == 2020
+
+
 def test_parse_fits_csv():
     text = (
         "siteID,typeID,date,value,error\n"
