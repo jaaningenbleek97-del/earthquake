@@ -100,6 +100,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Old hunt: non-catalog knobs vs what the aftershock model leaves behind",
     )
     hunt.add_argument(
+        "--quiet-slice",
+        action="store_true",
+        help="Only mornings with |Dst|<=20, Kp<3, and no aftershock swarm",
+    )
+    hunt.add_argument(
         "--sequence",
         action="store_true",
         help="Hunt sequence/foreshock catalog columns vs a first large quake; never issued p",
@@ -225,6 +230,12 @@ def main(argv: list[str] | None = None) -> int:
     graph.add_argument("--train-end", default="2018-12-31")
     graph.add_argument("--holdout-start", default="2019-01-01")
     graph.add_argument("--no-write-features", action="store_true")
+
+    tape = sub.add_parser("tape", help="Rebuild a strategy desk tape (one model fit, every series the desk replays); no issued p")
+    tape.add_argument("--label", type=int, default=1, choices=[1, 2], help="first-shock answer key version")
+    tape.add_argument("--name", default=None, help="tape folder under data/eval (default follows the label)")
+    tape.add_argument("--train-end", default="2008-12-31")
+    tape.add_argument("--holdout-start", default="2009-01-01")
 
     lab = sub.add_parser("serve", help="Open the local lab UI (ledger, scoreboard, map)")
     lab.add_argument("--host", default="127.0.0.1")
@@ -460,6 +471,7 @@ def main(argv: list[str] | None = None) -> int:
             holdout_start=args.holdout_start,
             fresh=not args.etas_residual,
             sequence=args.sequence,
+            quiet_slice=args.quiet_slice,
         )
         print(
             json.dumps(
@@ -986,6 +998,24 @@ def main(argv: list[str] | None = None) -> int:
                 default=str,
             )
         )
+        return 0
+
+    if args.cmd == "tape":
+        from eqpred.eval.strategy_desk import TAPE_FOR_LABEL, build_tape
+
+        name = args.name
+        if not name:
+            if args.train_end == "2008-12-31":
+                name = TAPE_FOR_LABEL[args.label]
+            else:
+                name = f"strategy_tape_{args.train_end[:4]}" + ("_v2" if args.label == 2 else "")
+        path = build_tape(
+            train_end=args.train_end,
+            holdout_start=args.holdout_start,
+            name=name,
+            label_version=args.label,
+        )
+        print(f"tape {name} (answer key version {args.label}) -> {path}")
         return 0
 
     if args.cmd == "serve":

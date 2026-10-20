@@ -33,10 +33,13 @@ VERSION_COLUMNS = (
 
 
 def _ms_to_utc(ms: object) -> datetime | None:
+    """UTC from Unix milliseconds. Works for dates before 1970 on Windows."""
     if ms is None or ms == "":
         return None
     try:
-        return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
+        from datetime import timedelta
+
+        return datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(ms) / 1000.0)
     except (TypeError, ValueError, OSError, OverflowError):
         return None
 

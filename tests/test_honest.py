@@ -81,6 +81,27 @@ def test_fit_val_split_uses_late_train_not_one_year_on_long_span():
     assert days[fit].max() + pd.Timedelta(days=HORIZON_DAYS) <= days[val].min()
 
 
+def test_fit_val_split_fallback_keeps_horizon_embargo():
+    # A thin early stretch plus a late block forces the last-year fallback.
+    days = pd.date_range("2010-01-01", "2018-12-31", freq="D", tz="UTC")
+    early = days < pd.Timestamp("2010-02-01", tz="UTC")
+    late = days >= pd.Timestamp("2017-09-01", tz="UTC")
+    fit, val = fit_val_split(days, np.asarray(early | late), purge=HORIZON_DAYS)
+    assert days[val].min() == pd.Timestamp("2018-01-01", tz="UTC")
+    assert int(fit.sum()) >= 80
+    assert days[fit].max() + pd.Timedelta(days=HORIZON_DAYS) <= days[val].min()
+
+
+def test_fit_val_split_drops_validation_rather_than_overlap_it():
+    days = pd.date_range("2010-01-01", "2018-12-31", freq="D", tz="UTC")
+    early = days < pd.Timestamp("2010-02-01", tz="UTC")
+    late = days >= pd.Timestamp("2017-12-12", tz="UTC")
+    train = np.asarray(early | late)
+    fit, val = fit_val_split(days, train, purge=HORIZON_DAYS)
+    assert not val.any()
+    assert np.array_equal(fit, train)
+
+
 def test_holm_adjust_is_monotone_and_skips_none():
     out = holm_adjust([0.04, 0.02, None, 0.20])
     assert out[2] is None

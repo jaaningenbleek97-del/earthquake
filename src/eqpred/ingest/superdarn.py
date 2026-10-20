@@ -15,7 +15,6 @@ from urllib.parse import urljoin
 import pandas as pd
 
 from eqpred.ingest.http import fetch_bytes, fetch_text
-from eqpred.records import iso
 from eqpred.stamp import utc_ts
 
 SOURCE = "superdarn.unwin"

@@ -101,6 +101,14 @@ WAVE4_SOURCES = (
     "vlf.public",
     "nasa.tir",
     "das.haast",
+    "gcmt.cmt",
+    "eqdb.nied",
+    "hobitss.sws",
+    "hobitss.obs",
+    "geonet.cmt",
+    "hikurangi.sse2019",
+    "geonet.rupture",
+    "sws.db",
 )
 
 
@@ -1041,6 +1049,120 @@ def ingest_wave4(
             print(f"  das.haast {len(das)} days")
         else:
             print("  das.haast empty (partnership, not a 20-year wget)")
+
+    if _wanted("gcmt.cmt", only):
+        from eqpred.ingest.cmt import pull_cmt
+
+        print("ingest Global CMT mechanisms")
+        try:
+            cmt = pull_cmt(run_id)
+        except Exception as exc:  # noqa: BLE001 — optional overlay
+            print(f"  gcmt.cmt skipped: {exc}")
+            cmt = pd.DataFrame()
+        if not cmt.empty:
+            written["gcmt.cmt"] = _write(cmt, dest / "gcmt.cmt" / f"{run_id}.parquet")
+            print(f"  gcmt.cmt {len(cmt)} solutions")
+        else:
+            print("  gcmt.cmt empty")
+
+    if _wanted("eqdb.nied", only):
+        from eqpred.ingest.nied import pull_nied
+
+        print("ingest NIED Japan tremor")
+        try:
+            nied = pull_nied(start, end, run_id)
+        except Exception as exc:  # noqa: BLE001 — optional overlay
+            print(f"  eqdb.nied skipped: {exc}")
+            nied = pd.DataFrame()
+        if not nied.empty:
+            written["eqdb.nied"] = _write(nied, dest / "eqdb.nied" / f"{run_id}.parquet")
+            print(f"  eqdb.nied {len(nied)} events")
+        else:
+            print("  eqdb.nied empty")
+
+    if _wanted("hobitss.sws", only) or _wanted("hobitss.obs", only):
+        from eqpred.ingest.hobitss import pull_hobitss
+
+        print("ingest HOBITSS splitting and offshore catalog")
+        try:
+            sws, obs = pull_hobitss(run_id)
+        except Exception as exc:  # noqa: BLE001 — optional overlay
+            print(f"  hobitss skipped: {exc}")
+            sws, obs = pd.DataFrame(), pd.DataFrame()
+        if _wanted("hobitss.sws", only) and not sws.empty:
+            written["hobitss.sws"] = _write(sws, dest / "hobitss.sws" / f"{run_id}.parquet")
+            print(f"  hobitss.sws {len(sws)} splits")
+        if _wanted("hobitss.obs", only) and not obs.empty:
+            written["hobitss.obs"] = _write(obs, dest / "hobitss.obs" / f"{run_id}.parquet")
+            print(f"  hobitss.obs {len(obs)} events")
+
+    if _wanted("geonet.cmt", only):
+        from eqpred.ingest.geonet_mt import pull_geonet_cmt
+
+        print("ingest GeoNet moment tensors")
+        try:
+            tensors = pull_geonet_cmt(run_id)
+        except Exception as exc:  # noqa: BLE001 — optional overlay
+            print(f"  geonet.cmt skipped: {exc}")
+            tensors = pd.DataFrame()
+        if not tensors.empty:
+            written["geonet.cmt"] = _write(tensors, dest / "geonet.cmt" / f"{run_id}.parquet")
+            print(f"  geonet.cmt {len(tensors)} solutions")
+        else:
+            print("  geonet.cmt empty")
+
+    if _wanted("hikurangi.sse2019", only):
+        from eqpred.ingest.sse2019 import pull_sse2019
+
+        print("ingest 2019 Hikurangi slow-slip earthquake catalog")
+        try:
+            sse = pull_sse2019(run_id)
+        except Exception as exc:  # noqa: BLE001 — optional overlay
+            print(f"  hikurangi.sse2019 skipped: {exc}")
+            sse = pd.DataFrame()
+        if not sse.empty:
+            written["hikurangi.sse2019"] = _write(sse, dest / "hikurangi.sse2019" / f"{run_id}.parquet")
+            print(f"  hikurangi.sse2019 {len(sse)} events")
+        else:
+            print("  hikurangi.sse2019 empty")
+        from eqpred.ingest.sse2019 import pull_sse2019_waveforms
+
+        try:
+            wave_path = pull_sse2019_waveforms(dest / "hikurangi.sse2019" / "Event_waveform.tgz")
+            print(f"  hikurangi.sse2019 waveforms {wave_path}")
+        except Exception as exc:  # noqa: BLE001 — optional overlay
+            print(f"  hikurangi.sse2019 waveforms skipped: {exc}")
+
+    if _wanted("geonet.rupture", only):
+        from eqpred.ingest.rupture import pull_rupture_models
+        from eqpred.paths import repo_root
+
+        print("ingest GeoNet rupture models")
+        try:
+            models = pull_rupture_models(root or repo_root(), run_id)
+        except Exception as exc:  # noqa: BLE001 — optional overlay
+            print(f"  geonet.rupture skipped: {exc}")
+            models = pd.DataFrame()
+        if not models.empty:
+            written["geonet.rupture"] = _write(models, dest / "geonet.rupture" / f"{run_id}.parquet")
+            print(f"  geonet.rupture {len(models)} models")
+        else:
+            print("  geonet.rupture empty")
+
+    if _wanted("sws.db", only):
+        from eqpred.ingest.sws_db import pull_splitting_db
+
+        print("ingest shear-wave splitting database")
+        try:
+            splits = pull_splitting_db(run_id)
+        except Exception as exc:  # noqa: BLE001 — optional overlay
+            print(f"  sws.db skipped: {exc}")
+            splits = pd.DataFrame()
+        if not splits.empty:
+            written["sws.db"] = _write(splits, dest / "sws.db" / f"{run_id}.parquet")
+            print(f"  sws.db {len(splits)} New Zealand measurements")
+        else:
+            print("  sws.db empty")
     return written
 
 

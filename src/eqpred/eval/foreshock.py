@@ -23,7 +23,6 @@ from eqpred.eval.hunt import _etas_p, driver_family
 from eqpred.eval.mainshock import (
     HORIZON_DAYS,
     ISSUED_TARGETS,
-    THIS_WEEK_BRIER_FLOOR,
     _chance,
     _fit_kind,
     _mix,

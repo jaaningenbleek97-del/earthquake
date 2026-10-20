@@ -8,7 +8,7 @@ Otago, Southland, and Horizons. This is surface water, not groundwater.
 
 import re
 from datetime import datetime, timedelta
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 import pandas as pd
 

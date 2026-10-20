@@ -38,7 +38,7 @@ def parse_fdsn_geojson(payload: object, source: str, ingest_run_id: str) -> pd.D
         mag = props.get("mag")
         if t_ms is None or mag is None:
             continue
-        observed = datetime.fromtimestamp(float(t_ms) / 1000.0, tz=timezone.utc)
+        observed = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_ms) / 1000.0)
         lon, lat = coords[0], coords[1]
         depth = coords[2] if len(coords) > 2 else None
         rec = observation(

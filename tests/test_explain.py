@@ -10,6 +10,9 @@ from eqpred.eval.lineup import (
     _raw_scale,
     _reading_groups,
     _share_ceiling,
+    group_rate_cap,
+    pile_factor,
+    three_day_magnitude,
     vote_cap,
     watch_agreement,
 )
@@ -130,3 +133,14 @@ def test_copies_of_one_measurement_share_a_ceiling():
     assert abs(float(shared[0][0]) - 0.01 / 3) < 1e-9
     assert abs(float(total[1]) - 0.008) < 1e-9
     assert shared[2][1] == 0.0
+    assert three_day_magnitude("global", 7.0) == 7.0
+    assert three_day_magnitude("hikurangi", 5.0) == 4.5
+    assert three_day_magnitude("alpine", 5.0) == 4.5
+    assert three_day_magnitude("kermadec", 6.0) == 5.0
+    rare = group_rate_cap(0.03, np.array([0.03]))
+    common = group_rate_cap(0.03, np.array([0.10]))
+    assert abs(float(rare[0]) - 0.015) < 1e-12
+    assert abs(float(common[0]) - 0.05) < 1e-12
+    factor = pile_factor(np.array([0.2, -0.2]), np.array([0.10, 0.10]))
+    assert abs(float(factor[0]) - 0.75) < 1e-12
+    assert abs(float(factor[1]) - 0.25) < 1e-12

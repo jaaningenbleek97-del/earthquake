@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from eqpred.catalog import load_comcat, load_comcat_versions
-from eqpred.eval.hunt import BOX_MAG, GLOBAL_MAG, _etas_p
+from eqpred.eval.hunt import _etas_p
 from eqpred.eval.honest import week_mask
 from eqpred.eval.horizon import HORIZON_DAYS
 from eqpred.eval.mainshock import ISSUED_TARGETS, _chance, _place, load_mainshock

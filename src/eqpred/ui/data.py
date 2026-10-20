@@ -229,10 +229,31 @@ def _trim_hunt(pack: dict | None, n: int = 40, *, keep_catalog: bool = False) ->
     return out
 
 
+SNAPSHOT_FEATURE_COLUMNS = (
+    "issue_time",
+    "gnss_east_mm",
+    "tec_tecu",
+    "tec_japan_tecu",
+    "era5_sp_pa",
+    "mag_h_nt",
+    "n_geonet_m3_7d",
+    "mig_along_hikurangi",
+)
+
+
+def _snapshot_features(path: Path) -> pd.DataFrame:
+    """Only the columns the status panel reads; the full table is thousands of columns."""
+    if not path.exists():
+        return pd.DataFrame()
+    import pyarrow.parquet as pq
+
+    names = set(pq.read_schema(path).names)
+    return pd.read_parquet(path, columns=[c for c in SNAPSHOT_FEATURE_COLUMNS if c in names])
+
+
 def snapshot(root: Path | None = None) -> dict:
     ledger = _load_ledger(root)
-    features_path = feature_dir(root) / "global_daily.parquet"
-    features = pd.read_parquet(features_path) if features_path.exists() else pd.DataFrame()
+    features = _snapshot_features(feature_dir(root) / "global_daily.parquet")
     quakes = try_latest_raw("usgs.comcat", root)
     battery_path = data_dir(root) / "eval" / "battery.json"
     battery = json.loads(battery_path.read_text(encoding="utf-8")) if battery_path.exists() else []
@@ -410,6 +431,7 @@ def snapshot(root: Path | None = None) -> dict:
             for rid, region in REGIONS.items()
         },
         "model_labels": MODEL_LABELS,
+        "saved_calls": _saved_calls(quakes, root),
     }
 
 
@@ -1005,6 +1027,88 @@ def _feature_row(day, root: Path | None = None):
     return match.iloc[0]
 
 
+def _load_research_cards(root: Path | None = None) -> dict:
+    path = data_dir(root) / "eval" / "research_cards.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _saved_calls(quakes: pd.DataFrame | None, root: Path | None) -> dict:
+    from eqpred.eval.vote_freeze import saved_call_rows
+
+    try:
+        return saved_call_rows(quakes, root)
+    except Exception:
+        return {"rows": [], "n": 0, "n_waiting": 0, "n_closed": 0, "n_hits": 0, "plain": "Saved calls could not be scored."}
+
+
+def _apply_live_row(card: dict | None, row: dict) -> dict:
+    """The main-screen number is the latest working card. Saved exams stay on their tab."""
+    p = row.get("p")
+    chance = row.get("chance_plain") or _chance_copy(p)
+    climate = row.get("climatology_p")
+    climate_chance = row.get("climatology_chance_plain") or _chance_copy(climate)
+    held = bool(row.get("held_to_climatology"))
+    sentence = row.get("sentence") or (card or {}).get("fresh_sentence") or (card or {}).get("sentence") or ""
+    base = dict(card or {})
+    issue = str(row.get("issue_day") or "")[:10]
+    base.update(
+        {
+            "region_name": row.get("region") or base.get("region_name"),
+            "label": row.get("label") or base.get("label"),
+            "magnitude_min": row.get("magnitude_min", base.get("magnitude_min")),
+            "horizon_days": int(row.get("horizon_days") or 30),
+            "p": p,
+            "value": p,
+            "chance_plain": chance,
+            "fresh_p": p,
+            "fresh_raw_p": p,
+            "fresh_chance_plain": chance,
+            "fresh_raw_chance_plain": row.get("fresh_raw_chance_plain") or chance,
+            "fresh_sentence": sentence,
+            "sentence": sentence,
+            "fresh_why": list(row.get("why") or []),
+            "held_to_climatology": held,
+            "week_state": "rate" if held else "moved",
+            "climatology_p": climate,
+            "climatology_chance_plain": climate_chance,
+            "issued_at": f"{issue}T00:00:00Z" if issue else base.get("issued_at"),
+            "live": True,
+            "mainshock": True,
+            "hit": None,
+            "window_closed": False,
+            "neighborhood_plain": None,
+            "wait_plain": None,
+            "wait_days": None,
+            "traffic_sentence": None,
+            "model_id": base.get("model_id") or "working.30d",
+        }
+    )
+    return base
+
+
+def _live_copy(rows: list[dict], day: str) -> dict:
+    held = all(bool(row.get("held_to_climatology")) for row in rows) if rows else True
+    note = (
+        " It has not beaten a typical year on later mornings yet, so that typical rate sits beside each number."
+        if held
+        else " The usual rate from a typical year sits beside each number."
+    )
+    return {
+        "held": held,
+        "mode": "all",
+        "title": "This week’s forecast",
+        "lede": (
+            f"Latest working cards for {day}. Older saved calls are scored on their own tab as each window closes."
+            f"{note}"
+        ),
+    }
+
+
 def globe_view(root: Path | None = None) -> dict:
     """This week's issued calls plus recent quakes for the 3D globe. Transfer boxes stay off."""
     cards = _joined_ledger(root)
@@ -1081,7 +1185,7 @@ def globe_view(root: Path | None = None) -> dict:
     feat_row = _feature_row(feat_day, root) if feat_day is not None else None
     feat_dict = None if feat_row is None else {k: _jsonable(v) for k, v in feat_row.to_dict().items()}
 
-    return {
+    pack = {
         "issue_day": None if latest is None else latest.date().isoformat(),
         "global": global_card,
         "boxes": boxes,
@@ -1123,9 +1227,38 @@ def globe_view(root: Path | None = None) -> dict:
         "leftover": (mainshock or {}).get("leftover") or load_leftover(root),
         "leftover_look": (mainshock or {}).get("leftover_look") or load_leftover_look(root),
         "circus": (mainshock or {}).get("circus") or load_circus(root),
+        "research_cards": _load_research_cards(root),
         "experiments": (mainshock or {}).get("experiments") or [],
         "evaluation": (mainshock or {}).get("evaluation"),
     }
+    live = [
+        row
+        for row in ((mainshock or {}).get("draft") or {}).get("week") or []
+        if row.get("region") in {"global", "hikurangi", "alpine", "kermadec"} and row.get("issue_day")
+    ]
+    if live:
+        by_region = {str(row.get("region")): row for row in live}
+        if "global" in by_region:
+            pack["global"] = _apply_live_row(pack.get("global"), by_region["global"])
+        for box in pack["boxes"]:
+            row = by_region.get(str(box.get("id")))
+            if row:
+                box["card"] = _apply_live_row(box.get("card"), row)
+                box["magnitude_min"] = row.get("magnitude_min", box.get("magnitude_min"))
+        day = str(live[0].get("issue_day"))[:10]
+        pack["issue_day"] = day
+        pack["copy"] = _live_copy(live, day)
+        live_end = (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        live_start = (pd.Timestamp(day) - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
+        drawn = map_quakes(root, start=live_start, end=live_end, minmag=6.0)
+        pack["quakes"] = drawn.get("quakes") or []
+        pack["quake_range"] = {"start": live_start, "end": live_end}
+        feat_row = _feature_row(pd.Timestamp(day, tz="UTC"), root)
+        if feat_row is not None:
+            feat_dict = {k: _jsonable(v) for k, v in feat_row.to_dict().items()}
+            pack["features"] = feat_dict
+            pack["watch"] = watch_list(feat_dict)
+    return pack
 
 
 def map_quakes(

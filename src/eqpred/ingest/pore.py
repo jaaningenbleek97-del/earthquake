@@ -14,6 +14,7 @@ import pandas as pd
 
 from eqpred.paths import raw_dir
 from eqpred.records import iso
+from eqpred.stamp import merge_daily
 
 SOURCE = "iodp.pore"
 LICENSE = "https://doi.org/10.5281/zenodo.19340667"
@@ -61,5 +62,5 @@ def pore_daily(root: Path | None = None) -> pd.DataFrame:
     out = frames[0]
     for part in frames[1:]:
         cols = [c for c in part.columns if c.startswith("pore_")]
-        out = out.merge(part[["observed_at", *cols]], on="observed_at", how="outer")
+        out = merge_daily(out, part, cols)
     return out.sort_values("observed_at").reset_index(drop=True)

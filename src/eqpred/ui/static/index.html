@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>This week’s forecast — Earthquake prediction lab</title>
-  <link rel="stylesheet" href="/style.css?v=earth-v8" />
+  <link rel="stylesheet" href="/style.css?v=earth-v11" />
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -19,11 +19,14 @@
     </header>
     <nav class="tabs" role="tablist" aria-label="Lab sections">
       <button type="button" class="tab is-on" role="tab" aria-selected="true" data-tab="overview">This week</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="saved">Saved calls</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="how">How it works</button>
       <button type="button" class="tab" role="tab" aria-selected="false" data-tab="scoreboard">Results</button>
       <button type="button" class="tab" role="tab" aria-selected="false" data-tab="ledger">All calls</button>
       <button type="button" class="tab" role="tab" aria-selected="false" data-tab="drivers">Signals</button>
       <button type="button" class="tab" role="tab" aria-selected="false" data-tab="earth">Earth state</button>
       <button type="button" class="tab" role="tab" aria-selected="false" data-tab="aftershock">Aftershocks</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="strategies">Strategies</button>
       <button type="button" class="tab" role="tab" aria-selected="false" data-tab="lab">Workshop</button>
     </nav>
   </div>
@@ -51,9 +54,11 @@
             <button type="button" class="btn ghost is-on" data-fresh-mode="all" aria-pressed="true">Full history</button>
             <button type="button" class="btn ghost" data-fresh-mode="lastweek" aria-pressed="false">Last 7 days of sensors</button>
           </div>
-          <div id="week-global"></div>
-          <div id="week-boxes"></div>
-          <p class="legend-line">The four cards are the frozen 30-day chances of a first large shock. Those are the ones we score. The 3-day row lets every reading move the number, with a ceiling, and does not replace the 30-day card. The working model can still change and does not replace either card.</p>
+          <div class="active-cards">
+            <div id="week-global"></div>
+            <div id="week-boxes"></div>
+          </div>
+          <p class="legend-line">These are the latest working cards. The big number is a chance. 20 in 100 means about 20 times in 100 mornings like this. The line under a short card, such as 2×, says how that compares with the usual rate. Older calls stay on <a href="#saved">Saved calls</a> and get a result when their window closes. <a href="#how">How it works</a> explains the whole lab.</p>
           <div id="watch-strip" class="watch-strip"></div>
           <div id="week-sidecars"></div>
           <p class="hint" id="week-empty" hidden>No this-week number yet.</p>
@@ -62,7 +67,9 @@
 
       <details class="fold">
         <summary>What these numbers mean</summary>
-        <p>Each card is a <strong>30-day chance of a first large quake</strong> — not aftershocks of one that already happened. The published number uses every dated sensor we can replay, sitting on that morning’s typical five-year rate. We only score windows that have already finished, so a future quake cannot move today’s number. Japan and Chile test the method; they never get a live card. A chance of 24 in 100 means: in 100 similar months we would expect about 24 hits. This is a research product, not a public warning.</p>
+        <p>A card is a chance that a <strong>first large earthquake</strong> happens in that place, in that window. First means we do not count aftershocks of a quake that already counted.</p>
+        <p><strong>26 in 100</strong> means we would expect about 26 of those quakes in 100 mornings like this one. <strong>2.5× the usual rate</strong> means this morning is two and a half times the ordinary chance for that place. Half means the card has been pulled down as far as it is allowed to go.</p>
+        <p>The usual rate is the last five years, and only windows that have already finished. Today’s quake cannot change today’s card. This page shows the latest working cards. Every call that has already been written stays on <a href="#saved">Saved calls</a>. We do not change a saved call after we see what happened. This is research, not a public warning. The full picture is on <a href="#how">How it works</a>.</p>
       </details>
 
       <article class="card" id="day-card">
@@ -80,6 +87,144 @@
         <p class="hint">When the aftershock model is unusually quiet, we sometimes publish a separate alert. Overlapping alerts count as one episode. <em>Fresh</em> means the large quake was not just an aftershock of a recent one.</p>
         <div id="episode-out"></div>
       </details>
+    </section>
+
+    <section id="saved" class="panel" role="tabpanel">
+      <header class="page-head">
+        <h2>Saved calls</h2>
+        <p>Every card we have already written. A later fit does not change these numbers. When a window closes, the row says whether a first large quake happened.</p>
+      </header>
+      <p class="hint" id="saved-meta">Loading saved calls…</p>
+      <div id="saved-out"></div>
+    </section>
+
+    <section id="how" class="panel" role="tabpanel">
+      <header class="page-head">
+        <h2>How it works</h2>
+        <p>Each morning the lab writes a chance that a first large earthquake will happen. This week shows the latest working cards. Saved calls keeps every card already written and scores it when the window closes. This is research, not a warning.</p>
+      </header>
+
+      <h3 class="how-label">From a measurement to a score</h3>
+      <ol class="flow">
+        <li>
+          <span class="flow-num">1</span>
+          <div>
+            <h3>Readings arrive with a time</h3>
+            <p>Solar wind, GPS, tides, the earthquake catalog, and the other feeds each carry the time we could have known them. A morning is only allowed to use what was already in hand.</p>
+          </div>
+        </li>
+        <li>
+          <span class="flow-num">2</span>
+          <div>
+            <h3>Start from the usual rate</h3>
+            <p>Before any signal, the chance is how often that quake followed a morning in the last five years. Only windows that have already finished can move that rate, so a quake today cannot raise today’s card.</p>
+          </div>
+        </li>
+        <li>
+          <span class="flow-num">3</span>
+          <div>
+            <h3>Signals nudge the 3-day card</h3>
+            <p>The 3-day card starts from the same kind of model as the 7-day and 30-day cards. Readings then add on top. Copies of one measurement share one ceiling, and those extra points stay between half and 2.5× the usual rate.</p>
+          </div>
+        </li>
+        <li>
+          <span class="flow-num">4</span>
+          <div>
+            <h3>The 30-day card stays locked</h3>
+            <p>The main screen shows the latest working cards. Every call already written stays on Saved calls, including the 21 September 2026 exam. A later fit writes a new call for a new morning. It does not rewrite a call that is already on file. Years from 2019 on are the exam. Those 30-day windows close around 21 October 2026.</p>
+          </div>
+        </li>
+        <li>
+          <span class="flow-num">5</span>
+          <div>
+            <h3>We score only after the window closes</h3>
+            <p>A hit is a first large quake in that place, inside the window, at or above that card’s magnitude. We compare the card with the usual rate. A card that sits high every day is not a success just because a quake eventually happens.</p>
+          </div>
+        </li>
+      </ol>
+
+      <h3 class="how-label">The question</h3>
+      <article class="card how-block">
+        <p>Will a first large earthquake happen in this place, in this window?</p>
+        <p>First means the quake is large enough, and it is not an aftershock of one we already counted. A later shock in the same box, no larger and within about 200 km and 10 days of that quake, does not count again.</p>
+      </article>
+
+      <h3 class="how-label">The four places</h3>
+      <div class="how-grid">
+        <article class="card">
+          <h3>Earth-wide</h3>
+          <p>Magnitude 7 or larger, anywhere on Earth. The 3-day card uses the same cutoff.</p>
+        </article>
+        <article class="card">
+          <h3>Hikurangi</h3>
+          <p>Magnitude 5 or larger on the locked 30-day card. The 3-day card counts from magnitude 4.5, which is as low as this catalog goes.</p>
+        </article>
+        <article class="card">
+          <h3>Alpine Fault</h3>
+          <p>Magnitude 5 or larger on the locked card. The 3-day card counts from magnitude 4.5.</p>
+        </article>
+        <article class="card">
+          <h3>Kermadec</h3>
+          <p>Magnitude 6 or larger on the locked card. The 3-day card counts from magnitude 5.</p>
+        </article>
+      </div>
+      <p class="hint">Japan and Chile are practice boxes. They test the method. They do not get a live card, and they are not drawn on the globe.</p>
+
+      <h3 class="how-label">How to read a number</h3>
+      <div class="how-grid">
+        <article class="card">
+          <h3>26 in 100</h3>
+          <p>In 100 mornings like this, we would expect the quake about 26 times.</p>
+        </article>
+        <article class="card">
+          <h3>2.5× the usual rate</h3>
+          <p>The extra readings on the 3-day card can add up to one and a half times the usual rate on top of the shared model, or take away as much as half.</p>
+        </article>
+        <article class="card">
+          <h3>0.5× the usual rate</h3>
+          <p>The most those extra readings can subtract is half the usual rate. The shared model underneath can still sit lower or higher than that.</p>
+        </article>
+      </div>
+
+      <h3 class="how-label">Which card is which</h3>
+      <div class="how-grid">
+        <article class="card">
+          <h3>Locked 30-day card</h3>
+          <p>The official call. We score this one. We do not change it after we see whether the quake happened.</p>
+        </article>
+        <article class="card">
+          <h3>Working 30-day model</h3>
+          <p>The same question, still allowed to change. It sits beside the locked card and does not replace it.</p>
+        </article>
+        <article class="card">
+          <h3>3-day card</h3>
+          <p>The same kind of model as the longer cards, for the next 3 days, plus the reading votes on top. It does not replace the locked card.</p>
+        </article>
+        <article class="card">
+          <h3>7-day card</h3>
+          <p>The locked recipe, asking about the next 7 days. It does not replace the 30-day card.</p>
+        </article>
+        <article class="card">
+          <h3>Research cards</h3>
+          <p>Extra questions, such as which part of a fault, or whether slow slip is on. They do not replace the locked card.</p>
+        </article>
+        <article class="card">
+          <h3>Aftershocks</h3>
+          <p>A different question: any qualifying quake in the next 30 days, including aftershocks, from the catalog alone.</p>
+        </article>
+      </div>
+
+      <h3 class="how-label">Where to look</h3>
+      <ul class="how-links">
+        <li><a href="#overview">This week</a> shows the latest working cards on a globe.</li>
+        <li><a href="#saved">Saved calls</a> is every card already written, scored when its window closes.</li>
+        <li><a href="#scoreboard">Results</a> asks whether finished windows beat the usual rate.</li>
+        <li><a href="#ledger">All calls</a> is every dated card, and whether the quake happened.</li>
+        <li><a href="#drivers">Signals</a> is the measurements, day by day.</li>
+        <li><a href="#earth">Earth state</a> describes a morning. Those tools are not allowed to change the chance.</li>
+        <li><a href="#aftershock">Aftershocks</a> is the other question.</li>
+        <li><a href="#lab">Workshop</a> holds the scans and health checks. Nothing there replaces the locked card unless Results already showed it beat the usual rate.</li>
+      </ul>
     </section>
 
     <section id="scoreboard" class="panel" role="tabpanel">
@@ -216,6 +361,228 @@
         <h2>What the model believes</h2>
         <p class="hint">How often quakes start on their own, how strongly one quake triggers the next, and how fast that fades.</p>
         <div class="table-wrap"><table id="aftershock-params"></table></div>
+      </article>
+    </section>
+
+    <section id="strategies" class="panel" role="tabpanel">
+      <header class="page-head">
+        <h2>Strategy desk</h2>
+        <p>Every rule already scored is on the list below, best first. A new rule should use a new name. 1990–2008 is where a rule is chosen. 2009 onward is the rehearsal, with the chance and the hit rate on that same stretch. The interval is a paired test of that gain. Saving a card freezes it. Only windows that close after the save count as new evidence.</p>
+      </header>
+
+      <article class="card">
+        <h2>Already tried, best first</h2>
+        <p class="hint">Mean gain from 2009 onward, across Earth-wide, Hikurangi, the Alpine Fault, and Kermadec, and across 1, 3, 7, and 30 days. Zero ties the usual rate. A new rule should not repeat a name on this list.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Rank</th><th>Rule</th><th>Later years</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>Pair that held from 1990 to 2008</td><td>+0.0020</td></tr>
+            <tr><td>2</td><td>Slow slip that held in three eras</td><td>+0.0004</td></tr>
+            <tr><td>3</td><td>Middle group vote</td><td>+0.0001</td></tr>
+            <tr><td>4</td><td>Polar field that held in three eras</td><td>+0.0001</td></tr>
+            <tr><td>5</td><td>Quiet catalog</td><td>+0.0000</td></tr>
+            <tr><td>6</td><td>Fade a hot score</td><td>+0.0000</td></tr>
+            <tr><td>7</td><td>Loud call in a quiet stretch</td><td>+0.0000</td></tr>
+            <tr><td>8</td><td>Usual rate is climbing</td><td>+0.0000</td></tr>
+            <tr><td>9</td><td>Alarm that held in three eras</td><td>-0.0000</td></tr>
+            <tr><td>10</td><td>Neutrons that held in three eras</td><td>+0.0000</td></tr>
+            <tr><td>11</td><td>Interface quakes that held in three eras</td><td>-0.0001</td></tr>
+            <tr><td>12</td><td>Hold the window open</td><td>-0.0003</td></tr>
+            <tr><td>13</td><td>Polar field is high</td><td>-0.0003</td></tr>
+            <tr><td>14</td><td>14-day alarm, top 15%</td><td>-0.0004</td></tr>
+            <tr><td>15</td><td>Score is speeding up</td><td>-0.0004</td></tr>
+            <tr><td>16</td><td>Interface and slab</td><td>-0.0006</td></tr>
+            <tr><td>17</td><td>Neutrons are low</td><td>-0.0006</td></tr>
+            <tr><td>18</td><td>14-day alarm, top half</td><td>-0.0008</td></tr>
+            <tr><td>19</td><td>First crossing</td><td>-0.0009</td></tr>
+            <tr><td>20</td><td>Groups disagree</td><td>-0.0010</td></tr>
+            <tr><td>21</td><td>14-day alarm, top 40%</td><td>-0.0014</td></tr>
+            <tr><td>22</td><td>Neighbor fault leads</td><td>-0.0014</td></tr>
+            <tr><td>23</td><td>Sum of the other places</td><td>-0.0015</td></tr>
+            <tr><td>24</td><td>Crest only</td><td>-0.0016</td></tr>
+            <tr><td>25</td><td>Sun is loud</td><td>-0.0018</td></tr>
+            <tr><td>26</td><td>A down group cancels</td><td>-0.0021</td></tr>
+            <tr><td>27</td><td>Trust earned last quarter</td><td>-0.0022</td></tr>
+            <tr><td>28</td><td>14-day alarm, top 30%</td><td>-0.0023</td></tr>
+            <tr><td>29</td><td>Sudden jump</td><td>-0.0027</td></tr>
+            <tr><td>30</td><td>Slow slip is high</td><td>-0.0038</td></tr>
+            <tr><td>31</td><td>Short window must agree</td><td>-0.0039</td></tr>
+            <tr><td>32</td><td>Only trust a louder call</td><td>-0.0041</td></tr>
+            <tr><td>33</td><td>Alarm plus rarity</td><td>-0.0051</td></tr>
+            <tr><td>34</td><td>Previous window</td><td>-0.0057</td></tr>
+            <tr><td>35</td><td>After a quiet window</td><td>-0.0058</td></tr>
+            <tr><td>36</td><td>Gap above the usual rate</td><td>-0.0059</td></tr>
+            <tr><td>37</td><td>Alarm, then size</td><td>-0.0060</td></tr>
+            <tr><td>38</td><td>Tide must agree</td><td>-0.0060</td></tr>
+            <tr><td>39</td><td>Neighbor already shook</td><td>-0.0062</td></tr>
+            <tr><td>40</td><td>Four old measurements</td><td>-0.0064</td></tr>
+            <tr><td>41</td><td>Weekday</td><td>-0.0071</td></tr>
+            <tr><td>42</td><td>One best group</td><td>-0.0073</td></tr>
+            <tr><td>43</td><td>Hot versus its own month</td><td>-0.0074</td></tr>
+            <tr><td>44</td><td>Solar-cycle season</td><td>-0.0074</td></tr>
+            <tr><td>45</td><td>Lunar phase</td><td>-0.0076</td></tr>
+            <tr><td>46</td><td>Three windows agree</td><td>-0.0085</td></tr>
+            <tr><td>47</td><td>3-day rarity</td><td>-0.0098</td></tr>
+            <tr><td>48</td><td>Model and groups disagree</td><td>-0.0105</td></tr>
+            <tr><td>49</td><td>Only while skill is up</td><td>-0.0107</td></tr>
+            <tr><td>50</td><td>Three loud days</td><td>-0.0114</td></tr>
+            <tr><td>51</td><td>Calendar month</td><td>-0.0120</td></tr>
+            <tr><td>52</td><td>Bin map</td><td>-0.0123</td></tr>
+            <tr><td>53</td><td>Recent score levels</td><td>-0.0138</td></tr>
+            <tr><td>54</td><td>Rarity sets the rules</td><td>-0.0155</td></tr>
+            <tr><td>55</td><td>Shrink the move</td><td>-0.0173</td></tr>
+            <tr><td>56</td><td>Trust it after a bad year</td><td>-0.0227</td></tr>
+            <tr><td>57</td><td>Odds, not points</td><td>-0.0231</td></tr>
+            <tr><td>58</td><td>Both tails</td><td>-0.0255</td></tr>
+            <tr><td>59</td><td>Only trust a quieter call</td><td>-0.0293</td></tr>
+            <tr><td>60</td><td>Ignore a near miss</td><td>-0.0327</td></tr>
+            <tr><td>61</td><td>Stay home</td><td>-0.0333</td></tr>
+            <tr><td>62</td><td>Current card</td><td>-0.0334</td></tr>
+            <tr><td>63</td><td>Only the leftover</td><td>-0.0334</td></tr>
+            <tr><td>64</td><td>Misses count triple</td><td>-0.0342</td></tr>
+            <tr><td>65</td><td>Eight sign patterns</td><td>-0.0351</td></tr>
+            <tr><td>66</td><td>Agree or stay</td><td>-0.0677</td></tr>
+            <tr><td>67</td><td>Earned cap</td><td>-0.0679</td></tr>
+            <tr><td>68</td><td>Stack the one-day chance</td><td>-0.3169</td></tr>
+            <tr><td>69</td><td>Matched mornings</td><td>-0.5216</td></tr>
+          </tbody>
+        </table></div>
+      </article>
+      <article class="card">
+        <div class="filters">
+          <label>Answer key
+            <select id="st-tape">
+              <option value="strategy_tape_2008">Version 1</option>
+            </select>
+          </label>
+          <label>Window
+            <select id="st-horizon">
+              <option value="1">1 day</option>
+              <option value="3" selected>3 days</option>
+              <option value="7">7 days</option>
+              <option value="30">30 days</option>
+            </select>
+          </label>
+          <label>Place
+            <select id="st-region">
+              <option value="all" selected>All four</option>
+              <option value="global">Earth-wide</option>
+              <option value="hikurangi">Hikurangi</option>
+              <option value="alpine">Alpine Fault</option>
+              <option value="kermadec">Kermadec</option>
+            </select>
+          </label>
+          <label>Rule
+            <select id="st-strategy">
+              <option value="best_conjunction" selected>1. Pair that held from 1990 to 2008 (+0.0020)</option>
+              <option value="stable_slowslip">2. Slow slip that held in three eras (+0.0004)</option>
+              <option value="median_groups">3. Middle group vote (+0.0001)</option>
+              <option value="stable_spf">4. Polar field that held in three eras (+0.0001)</option>
+              <option value="quiet_catalog">5. Quiet catalog (+0.0000)</option>
+              <option value="fade">6. Fade a hot score (+0.0000)</option>
+              <option value="quiet_decade">7. Loud call in a quiet stretch (+0.0000)</option>
+              <option value="climate_rise">8. Usual rate is climbing (+0.0000)</option>
+              <option value="stable_alarm">9. Alarm that held in three eras (-0.0000)</option>
+              <option value="stable_neutrons">10. Neutrons that held in three eras (+0.0000)</option>
+              <option value="stable_interface">11. Interface quakes that held in three eras (-0.0001)</option>
+              <option value="hold">12. Hold the window open (-0.0003)</option>
+              <option value="spf_high">13. Polar field is high (-0.0003)</option>
+              <option value="alarm_14_15">14. 14-day alarm, top 15% (-0.0004)</option>
+              <option value="accel">15. Score is speeding up (-0.0004)</option>
+              <option value="pair">16. Interface and slab (-0.0006)</option>
+              <option value="neutron_low">17. Neutrons are low (-0.0006)</option>
+              <option value="alarm_14_50">18. 14-day alarm, top half (-0.0008)</option>
+              <option value="crossing">19. First crossing (-0.0009)</option>
+              <option value="group_spread">20. Groups disagree (-0.0010)</option>
+              <option value="alarm_14_40">21. 14-day alarm, top 40% (-0.0014)</option>
+              <option value="cross_lead">22. Neighbor fault leads (-0.0014)</option>
+              <option value="peer_sum">23. Sum of the other places (-0.0015)</option>
+              <option value="crest">24. Crest only (-0.0016)</option>
+              <option value="solar_high">25. Sun is loud (-0.0018)</option>
+              <option value="veto">26. A down group cancels (-0.0021)</option>
+              <option value="online_trust">27. Trust earned last quarter (-0.0022)</option>
+              <option value="alarm_14_30">28. 14-day alarm, top 30% (-0.0023)</option>
+              <option value="jump">29. Sudden jump (-0.0027)</option>
+              <option value="slowslip_high">30. Slow slip is high (-0.0038)</option>
+              <option value="cross_horizon">31. Short window must agree (-0.0039)</option>
+              <option value="believer">32. Only trust a louder call (-0.0041)</option>
+              <option value="alarm_rarity">33. Alarm plus rarity (-0.0051)</option>
+              <option value="markov">34. Previous window (-0.0057)</option>
+              <option value="after_quiet">35. After a quiet window (-0.0058)</option>
+              <option value="residual_alarm">36. Gap above the usual rate (-0.0059)</option>
+              <option value="alarm">37. Alarm, then size (-0.0060)</option>
+              <option value="tide_gate">38. Tide must agree (-0.0060)</option>
+              <option value="peer_outcome">39. Neighbor already shook (-0.0062)</option>
+              <option value="four_linear">40. Four old measurements (-0.0064)</option>
+              <option value="weekday">41. Weekday (-0.0071)</option>
+              <option value="one_group">42. One best group (-0.0073)</option>
+              <option value="trailing_rank">43. Hot versus its own month (-0.0074)</option>
+              <option value="solar_phase">44. Solar-cycle season (-0.0074)</option>
+              <option value="lunar">45. Lunar phase (-0.0076)</option>
+              <option value="stack_hot">46. Three windows agree (-0.0085)</option>
+              <option value="rarity_3_200">47. 3-day rarity (-0.0098)</option>
+              <option value="contradict">48. Model and groups disagree (-0.0105)</option>
+              <option value="equity">49. Only while skill is up (-0.0107)</option>
+              <option value="run3">50. Three loud days (-0.0114)</option>
+              <option value="month_rate">51. Calendar month (-0.0120)</option>
+              <option value="bin">52. Bin map (-0.0123)</option>
+              <option value="online_decile">53. Recent score levels (-0.0138)</option>
+              <option value="rarity">54. Rarity sets the rules (-0.0155)</option>
+              <option value="shrink">55. Shrink the move (-0.0173)</option>
+              <option value="contrarian">56. Trust it after a bad year (-0.0227)</option>
+              <option value="odds">57. Odds, not points (-0.0231)</option>
+              <option value="two_sided">58. Both tails (-0.0255)</option>
+              <option value="skeptic">59. Only trust a quieter call (-0.0293)</option>
+              <option value="deadzone">60. Ignore a near miss (-0.0327)</option>
+              <option value="stay">61. Stay home (-0.0333)</option>
+              <option value="current">62. Current card (-0.0334)</option>
+              <option value="leftover">63. Only the leftover (-0.0334)</option>
+              <option value="cost3">64. Misses count triple (-0.0342)</option>
+              <option value="pattern8">65. Eight sign patterns (-0.0351)</option>
+              <option value="agree">66. Agree or stay (-0.0677)</option>
+              <option value="earned">67. Earned cap (-0.0679)</option>
+              <option value="compound">68. Stack the one-day chance (-0.3169)</option>
+              <option value="matched">69. Matched mornings (-0.5216)</option>
+            </select>
+          </label>
+          <label>Delay, days
+            <input id="st-lag" type="number" min="0" max="180" step="1" value="0" />
+          </label>
+          <label>Alarm, top share
+            <input id="st-alarm" type="number" min="0.05" max="0.9" step="0.05" value="0.2" />
+          </label>
+          <label>Rarity constant
+            <input id="st-rarity" type="number" min="1" max="500" step="1" value="50" />
+          </label>
+          <label>Shrink factor
+            <input id="st-shrink" type="number" min="0" max="1" step="0.05" value="1" />
+          </label>
+          <label>Odds factor
+            <input id="st-odds" type="number" min="0" max="1" step="0.05" value="1" />
+          </label>
+          <label>Bins
+            <input id="st-bins" type="number" min="2" max="10" step="1" value="5" />
+          </label>
+          <label>Groups that must agree
+            <input id="st-agree" type="number" min="2" max="8" step="1" value="3" />
+          </label>
+          <label>Neighbor mornings
+            <input id="st-k" type="number" min="5" max="200" step="5" value="40" />
+          </label>
+          <label><input id="st-shrink-auto" type="checkbox" checked /> Choose shrink on check years</label>
+          <label><input id="st-odds-auto" type="checkbox" checked /> Choose odds on check years</label>
+          <label><input id="st-k-auto" type="checkbox" checked /> Choose neighbors on check years</label>
+          <label><input id="st-readings" type="checkbox" /> Current card includes reading votes</label>
+          <button type="button" id="st-go" class="btn">Run replay</button>
+          <button type="button" id="st-save" class="btn">Save this card</button>
+        </div>
+        <p class="hint" id="st-note"></p>
+        <div class="table-wrap"><table id="st-out"></table></div>
+      </article>
+      <article class="card">
+        <h2>Saved cards</h2>
+        <p class="hint" id="st-saved-note">A saved card keeps its knobs. New rules on the desk do not change it. Only windows that close after the save count as new evidence.</p>
+        <div class="table-wrap"><table id="st-saved"></table></div>
       </article>
     </section>
 
@@ -363,6 +730,6 @@
 
   <script src="https://unpkg.com/globe.gl@2.41.4/dist/globe.gl.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script src="/app.js?v=earth-v27"></script>
+  <script src="/app.js?v=earth-v45"></script>
 </body>
 </html>

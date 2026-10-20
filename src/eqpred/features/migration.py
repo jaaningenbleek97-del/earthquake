@@ -18,7 +18,7 @@ import pandas as pd
 from eqpred.catalog import apply_available_at, load_comcat_versions
 from eqpred.faults import FAULTS
 from eqpred.ingest.run import try_latest_raw
-from eqpred.regions import REGIONS, in_bbox, region_centroid_lon, wrap180
+from eqpred.regions import REGIONS, in_bbox, region_centroid_lon
 from eqpred.stamp import parse_utc, utc_ts
 
 LOOKBACK_DAYS = 14

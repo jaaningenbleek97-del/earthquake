@@ -15,6 +15,7 @@ on the old ETAS-residual hunt.
 from __future__ import annotations
 
 import json
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -88,6 +89,20 @@ def driver_family(column: str) -> str:
     name = column.lower()
     if "hikurangi_repeater" in name:
         return "slowslip"
+    if name.startswith("n_iface_"):
+        return "interface"
+    if name.startswith("n_slab_"):
+        return "slab"
+    if name.startswith("cmt_") or name.startswith("geonet_cmt_"):
+        return "mechanism"
+    if name.startswith("sws_") or name.startswith("swsdb_"):
+        return "mantle"
+    if name.startswith("rupture_"):
+        return "rupture"
+    if name.startswith("nied_"):
+        return "slowslip"
+    if name.startswith("obs_"):
+        return "offshore"
     if name.startswith(("n_fresh_", "days_since_fresh_", "b_fresh_", "rate_roll_")):
         return "fresh_catalog"
     if name.startswith(("n_m", "n_geonet", "n_fdsn", "days_since", "b_90", "log_energy", "energy_", "mig_swarm", "mig_n_", "seq_")):
@@ -100,12 +115,16 @@ def driver_family(column: str) -> str:
         return "pressure"
     if name.startswith("schumann_"):
         return "schumann"
+    if name.startswith("aardvark_"):
+        return "quiet"
     if name.startswith(("wiki_", "vlf_", "tir_")) or name in {"cal_weekday", "cal_payday", "cal_weekend"}:
         return "foil"
     if name.startswith(("sse_", "tremor_", "lfe_")):
         return "slowslip"
     if name.startswith(("sdarn_",)):
         return "radio"
+    if name.startswith(("qres_", "laic_")):
+        return "quiet"
     if name.startswith(("tec_", "gnss_", "gnssa_", "geonet_", "era5_", "mag_", "ulf_", "strain_", "radon_", "swarm_", "cses_", "tide_", "insar_", "dart_", "well_", "hydro_", "smap_", "roti_", "scint_", "dvv_", "wspr_")):
         return "wave2"
     if name.startswith("grace_"):
@@ -213,7 +232,10 @@ def _spearman(x: np.ndarray, y: np.ndarray) -> tuple[float | None, float | None,
     yy = y[mask]
     if np.nanstd(xx) == 0 or np.nanstd(yy) == 0:
         return None, None, n
-    rho, pval = spearmanr(xx, yy)
+    with warnings.catch_warnings():
+        # Near-constant input gives an undefined coefficient, handled just below.
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        rho, pval = spearmanr(xx, yy)
     if not np.isfinite(rho) or not np.isfinite(pval):
         return None, None, n
     return float(rho), float(pval), n
@@ -579,6 +601,7 @@ def run_hunt(
     quakes: pd.DataFrame | None = None,
     fresh: bool = True,
     sequence: bool = False,
+    quiet_slice: bool = False,
 ) -> dict[str, Any]:
     feat = features if features is not None else pd.read_parquet(feature_dir(root) / "global_daily.parquet")
     feat = feat.copy()
@@ -610,6 +633,18 @@ def run_hunt(
     replay_mask = week_mask(replay_raw)
 
     columns = _driver_columns(feat)
+    geo_quiet = None
+    if quiet_slice:
+        from eqpred.eval.waiting import swarm_mornings
+        from eqpred.features.quiet_residual import quiet_mornings
+
+        if "dst_nt" not in feat.columns or "kp" not in feat.columns:
+            raise ValueError("quiet slice needs dst_nt and kp on the daily table")
+        geo_quiet = quiet_mornings(
+            pd.to_numeric(feat["dst_nt"], errors="coerce").to_numpy(dtype=float),
+            pd.to_numeric(feat["kp"], errors="coerce").to_numpy(dtype=float),
+        )
+        print(f"quiet mornings {int(geo_quiet.sum())} of {len(geo_quiet)}", flush=True)
     if sequence:
         columns = [c for c in columns if driver_family(c) == "catalog"]
         targets = FRESH_TARGETS
@@ -634,24 +669,38 @@ def run_hunt(
             hits = _window_hits(catalog, region, mag, days, HORIZON_DAYS).astype(float)
             etas_p = _etas_p(catalog, days, region_id, mag, root, versions=versions)
             residual = hits - etas_p
-        for col in columns:
+        disc = discover_mask
+        conf = confirm_mask
+        replay = replay_mask
+        if geo_quiet is not None:
+            keep = geo_quiet & ~swarm_mornings(catalog, region, mag, days)
+            disc = discover_mask & keep
+            conf = confirm_mask & keep
+            replay = replay_mask & keep
+            print(
+                f"hunt {region_id} M{mag:g} quiet boring mornings {int(keep.sum())} knobs {len(columns)}",
+                flush=True,
+            )
+        for col_i, col in enumerate(columns):
+            if col_i and col_i % 500 == 0:
+                print(f"  {region_id} {col_i}/{len(columns)}", flush=True)
             raw = feat[col].to_numpy(dtype=float)
             for lag in lags:
                 driver = np.roll(raw, lag) if lag else raw
                 if lag:
                     driver = driver.copy()
                     driver[:lag] = np.nan
-                train_rho, train_p, train_n = _spearman(driver[discover_mask], residual[discover_mask])
-                confirm_rho, confirm_p, confirm_n = _spearman(driver[confirm_mask], residual[confirm_mask])
-                replay_rho, replay_p, replay_n = _spearman(driver[replay_mask], residual[replay_mask])
-                raw_rho, raw_p, _ = _spearman(driver[discover_mask], hits[discover_mask])
+                train_rho, train_p, train_n = _spearman(driver[disc], residual[disc])
+                confirm_rho, confirm_p, confirm_n = _spearman(driver[conf], residual[conf])
+                replay_rho, replay_p, replay_n = _spearman(driver[replay], residual[replay])
+                raw_rho, raw_p, _ = _spearman(driver[disc], hits[disc])
                 finite = raw[np.isfinite(raw)]
                 flag_like = (
                     finite.size > 0
                     and float(np.nanmax(finite) - np.nanmin(finite)) <= 1.0
                     and len(np.unique(finite)) <= 3
                 )
-                lift = _lift(driver[discover_mask], hits[discover_mask]) if flag_like else _median_lift(driver[discover_mask], hits[discover_mask])
+                lift = _lift(driver[disc], hits[disc]) if flag_like else _median_lift(driver[disc], hits[disc])
                 trials.append(
                     {
                         "driver": col,
@@ -715,6 +764,7 @@ def run_hunt(
         "scanned_at": iso(datetime.now(timezone.utc)),
         "fresh": use_fresh,
         "sequence": sequence,
+        "quiet_slice": quiet_slice,
         "writes_issued_p": False,
         "looks_at_all_sources": not sequence,
         "note": (
@@ -736,20 +786,32 @@ def run_hunt(
         ),
     }
     if use_fresh and not sequence:
+        side_discover = discover_mask if geo_quiet is None else discover_mask & geo_quiet
+        side_confirm = confirm_mask if geo_quiet is None else confirm_mask & geo_quiet
+        side_replay = replay_mask if geo_quiet is None else replay_mask & geo_quiet
         report["honest"] = _honest_sidecar(
             feat=feat,
             columns=columns,
             catalog=catalog,
             days=days,
-            discover_mask=discover_mask,
-            confirm_mask=confirm_mask,
-            replay_mask=replay_mask,
+            discover_mask=side_discover,
+            confirm_mask=side_confirm,
+            replay_mask=side_replay,
         )
         report["note"] += (
             " The climate-residual sidecar keeps every source, adds family stacks "
             "and quiet-start / M8, and asks whether a knob beats the rolling 5-year rate."
         )
-    dest_name = "hunt_sequence.json" if sequence else ("hunt_fresh.json" if use_fresh else "hunt.json")
+    if quiet_slice:
+        report["note"] += (
+            " This pass only uses mornings with |Dst|<=20, Kp<3, and no aftershock swarm."
+        )
+    if quiet_slice and use_fresh and not sequence:
+        dest_name = "hunt_fresh_quiet.json"
+    elif quiet_slice and not use_fresh:
+        dest_name = "hunt_etas_quiet.json"
+    else:
+        dest_name = "hunt_sequence.json" if sequence else ("hunt_fresh.json" if use_fresh else "hunt.json")
     dest = data_dir(root) / "eval" / dest_name
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")

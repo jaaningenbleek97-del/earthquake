@@ -11,6 +11,7 @@ Issued cards use this model's p. Climatology sits beside it as a foil.
 import hashlib
 import json
 import math
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -51,7 +52,8 @@ from eqpred.eval.strategies import _window_hits
 from eqpred.paths import data_dir, feature_dir
 from eqpred.records import iso
 from eqpred.regions import REGIONS, is_issued_box
-from eqpred.stamp import parse_utc, utc_ts
+from eqpred.safe_io import write_json
+from eqpred.stamp import parse_utc
 MAINSHOCK_LAGS = (0, 1, 2, 3, 5, 7, 10, 14, 21, 27, 30, 45, 54, 60, 81, 90, 180)
 LAST_WEEK_LAGS = (0, 1, 2, 3, 5, 7)
 DELAY_LAGS = frozenset({14, 21, 27, 30, 45, 54, 60, 81, 90, 180})
@@ -432,6 +434,12 @@ SHARED_FAMILIES = (
     "infrasound",
     "pressure",
     "schumann",
+    "interface",
+    "slab",
+    "mechanism",
+    "mantle",
+    "offshore",
+    "rupture",
 )
 ALL_EXPERIMENT_IDS = (
     "fresh_7d",
@@ -588,6 +596,10 @@ def is_issued_driver(name: str) -> bool:
     # It can be scored. It does not write today's issued chance.
     if base.startswith("sdarn_"):
         return False
+    # Quiet residuals and the one LAIC conjunction are a hunt. Slow slip stays
+    # out of issued probability, so the conjunction that uses it stays out too.
+    if base.startswith(("qres_", "laic_", "aardvark_")):
+        return False
     return is_last_week_column(raw)
 
 
@@ -684,7 +696,9 @@ class _BlankAwareScaler(BaseEstimator, TransformerMixin):
         if X.ndim == 1:
             X = X.reshape(-1, 1)
         count = np.sum(np.isfinite(X), axis=0)
-        with np.errstate(all="ignore"):
+        with warnings.catch_warnings(), np.errstate(all="ignore"):
+            # A column with no observed day is expected; it gets mean 0 and scale 1 below.
+            warnings.simplefilter("ignore", category=RuntimeWarning)
             mean = np.nanmean(X, axis=0)
             scale = np.sqrt(np.nanvar(X, axis=0))
         self.mean_ = np.where(np.isfinite(mean), mean, 0.0)
@@ -715,7 +729,9 @@ class _SitOutScaler(BaseEstimator, TransformerMixin):
         if X.ndim == 1:
             X = X.reshape(-1, 1)
         count = np.sum(np.isfinite(X), axis=0)
-        with np.errstate(all="ignore"):
+        with warnings.catch_warnings(), np.errstate(all="ignore"):
+            # A column with no observed day is expected; it gets mean 0 and scale 1 below.
+            warnings.simplefilter("ignore", category=RuntimeWarning)
             mean = np.nanmean(X, axis=0)
             scale = np.sqrt(np.nanvar(X, axis=0))
         self.mean_ = np.where(np.isfinite(mean), mean, 0.0)
@@ -746,7 +762,9 @@ class _ObservedScaler(BaseEstimator, TransformerMixin):
         if X.ndim == 1:
             X = X.reshape(-1, 1)
         count = np.sum(np.isfinite(X), axis=0)
-        with np.errstate(all="ignore"):
+        with warnings.catch_warnings(), np.errstate(all="ignore"):
+            # A column with no observed day is expected; it gets mean 0 and scale 1 below.
+            warnings.simplefilter("ignore", category=RuntimeWarning)
             mean = np.nanmean(X, axis=0)
             scale = np.sqrt(np.nanvar(X, axis=0))
         mean = np.where(np.isfinite(mean), mean, 0.0)
@@ -1708,7 +1726,6 @@ def _promoted_leftover_score(
 
         val_ok = _beats(val_mask)
         sealed_ok = _beats(sealed)
-        report_only = False
         print(
             f"fresh-shock leftover {region_id} M{mag:g} "
             f"val_skill={val_ok} sealed_skill={sealed_ok} in issued stack",
@@ -1832,12 +1849,18 @@ def _score_to_rate(
     train_mask: np.ndarray,
     min_n: int = 80,
     max_percentile: float = 90.0,
+    days: pd.DatetimeIndex | None = None,
+    horizon: int | None = None,
 ) -> np.ndarray:
     """Chance equals how often this box shook on past mornings with a similar score.
 
     The lookup mornings should be ones the encoder was not fit on. A score
     above the given percentile is read as that percentile, so the extreme
     tip of memorized hits cannot be quoted.
+
+    With `days` and `horizon`, a lookup morning that is itself being predicted
+    leaves out every lookup morning within `horizon` days of it. Neighbouring
+    mornings share most of their window, so otherwise it would see its own outcome.
     """
     score = np.asarray(score, dtype=float).reshape(-1)
     hits = np.asarray(hits, dtype=float).reshape(-1)
@@ -1865,7 +1888,44 @@ def _score_to_rate(
     prev[has_prev] = csum[left[has_prev] - 1]
     total = csum[right - 1] - prev
     out = np.clip(total / k, 1e-6, 1.0 - 1e-6)
+    if days is None or not horizon:
+        return out
+    stamps = pd.DatetimeIndex(days)
+    if stamps.tz is not None:
+        stamps = stamps.tz_convert("UTC").tz_localize(None)
+    day_num = stamps.values.astype("datetime64[D]").astype(np.int64)
+    ref_idx = np.flatnonzero(train)
+    ref_day = day_num[ref_idx]
+    sorted_pos = np.empty(n_train, dtype=np.int64)
+    sorted_pos[order] = np.arange(n_train)
+    gap = int(horizon)
+    for j, i in enumerate(ref_idx):
+        lo = np.searchsorted(ref_day, ref_day[j] - gap, side="left")
+        hi = np.searchsorted(ref_day, ref_day[j] + gap, side="right")
+        skip = np.sort(sorted_pos[lo:hi])
+        kept = n_train - skip.size
+        if kept < 1:
+            continue
+        kk = min(int(min_n), kept)
+        reduced_center = int(center[i]) - int(np.searchsorted(skip, center[i], side="left"))
+        first = int(np.clip(reduced_center - kk // 2, 0, kept - kk))
+        a = _kept_position(first, skip)
+        b = _kept_position(first + kk - 1, skip)
+        inside = skip[(skip >= a) & (skip <= b)]
+        window_sum = csum[b] - (csum[a - 1] if a > 0 else 0.0) - float(y_sorted[inside].sum())
+        out[i] = np.clip(window_sum / kk, 1e-6, 1.0 - 1e-6)
     return out
+
+
+def _kept_position(rank: int, skip: np.ndarray) -> int:
+    """Sorted position of the rank-th lookup morning once the skipped positions are removed."""
+    pos = int(rank)
+    for s in skip:
+        if s <= pos:
+            pos += 1
+        else:
+            break
+    return pos
 
 
 def _lift_onto_rate(
@@ -1897,8 +1957,13 @@ def _fit_shared_stack(
     horizon: int,
     root: Path | None = None,
     sit_out: bool = False,
+    targets: tuple[tuple[str, float], ...] | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, str], list[str], dict[str, list[dict[str, Any]]]]:
-    """One encoder on every non-empty family, then a tiny mix head per box."""
+    """One encoder on every non-empty family, then each box is lifted onto its rolling rate.
+
+    The mix weight is reported; it does not multiply the published chance.
+    """
+    boxes = tuple(targets) if targets else ISSUED_TARGETS
     raw_x, names = design
     n = len(days)
     y_rank = fresh_hits(catalog, REGIONS["global"], 7.0, days, horizon).astype(int)
@@ -1947,9 +2012,9 @@ def _fit_shared_stack(
         dict[str, np.ndarray], dict[str, str], list[str], dict[str, list[dict[str, Any]]]
     ]:
         out_fb: dict[str, np.ndarray] = {}
-        recs = {rid: "fresh_shared|climate" for rid, _mag in ISSUED_TARGETS}
-        conns = {rid: rate_conn for rid, _mag in ISSUED_TARGETS}
-        for region_id, mag in ISSUED_TARGETS:
+        recs = {rid: "fresh_shared|climate" for rid, _mag in boxes}
+        conns = {rid: rate_conn for rid, _mag in boxes}
+        for region_id, mag in boxes:
             hits = fresh_hits(catalog, REGIONS[region_id], mag, days, horizon).astype(float)
             out_fb[region_id] = rolling_climate_series(hits, days, horizon=horizon)
         return out_fb, recs, families, conns
@@ -1959,7 +2024,7 @@ def _fit_shared_stack(
     stacked_y = np.concatenate(
         [
             fresh_hits(catalog, REGIONS[rid], mag, days, horizon).astype(int)[fit0]
-            for rid, mag in ISSUED_TARGETS
+            for rid, mag in boxes
         ]
     )
     if int(np.unique(stacked_y).size) < 2:
@@ -1967,7 +2032,7 @@ def _fit_shared_stack(
     try:
         encoder = _fit_kind(
             "logit",
-            np.vstack([stack[fit0]] * len(ISSUED_TARGETS)),
+            np.vstack([stack[fit0]] * len(boxes)),
             stacked_y,
             {"C": 0.2, "sit_out": sit_out},
         )
@@ -1978,14 +2043,16 @@ def _fit_shared_stack(
     out: dict[str, np.ndarray] = {}
     recipes: dict[str, str] = {}
     conns: dict[str, list[dict[str, Any]]] = {}
-    for region_id, mag in ISSUED_TARGETS:
+    for region_id, mag in boxes:
         hits = fresh_hits(catalog, REGIONS[region_id], mag, days, horizon).astype(int)
         climate = recent_climate(hits.astype(float), days, train_mask)
         roll = rolling_climate_series(hits.astype(float), days, horizon=horizon)
         score = z[:, 0] if getattr(z, "ndim", 1) == 2 else np.asarray(z, dtype=float).reshape(-1)
         ref = val0 if int(val0.sum()) >= 80 else fit0
         if int(ref.sum()) >= 2:
-            similar = _score_to_rate(score, hits.astype(float), ref, max_percentile=100)
+            similar = _score_to_rate(
+                score, hits.astype(float), ref, max_percentile=100, days=days, horizon=horizon
+            )
             raw_p = _lift_onto_rate(similar, hits.astype(float), ref, roll, climate)
         else:
             raw_p = score
@@ -2257,11 +2324,14 @@ def _short_horizon_cards(
     catalog_end: pd.Timestamp,
     root: Path | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """7-day and 3-day chances beside the 30-day card. The 3-day card lets every reading move it."""
+    """7-day and 3-day chances beside the 30-day card. The 3-day card uses the same model, then readings add on top."""
     rows: list[dict[str, Any]] = []
     draft: dict[str, Any] = {
         "writes_issued_p": False,
-        "note": "The 3-day card is open. Every reading can move it. It does not replace the 30-day card.",
+        "note": (
+            "The 3-day card uses the same model as the 7-day and 30-day cards. "
+            "Every reading can then add or subtract on top. It does not replace the 30-day card."
+        ),
         "week": [],
     }
     latest = len(days) - 1
@@ -2273,6 +2343,9 @@ def _short_horizon_cards(
             days, closed, train_end, holdout_start, purge=horizon
         )
         print(f"fresh-shock short card next {horizon} days", flush=True)
+        from eqpred.eval.lineup import three_day_targets
+
+        boxes = three_day_targets() if horizon == 3 else ISSUED_TARGETS
         shared_map, _recipes, _families, _conns = _fit_shared_stack(
             feat=feat,
             design=design,
@@ -2282,7 +2355,32 @@ def _short_horizon_cards(
             hold_mask=hold_mask,
             horizon=horizon,
             root=root,
+            targets=boxes,
         )
+        if horizon == 3:
+            from eqpred.eval.lineup import open_three_day_rows
+
+            voted = open_three_day_rows(
+                design=design,
+                catalog=catalog,
+                days=days,
+                train_mask=train_mask,
+                hold_mask=hold_mask,
+                horizon=3,
+                shared_base=shared_map,
+            )
+            rows.extend(voted)
+            draft = {
+                "writes_issued_p": False,
+                "horizon_days": 3,
+                "same_as_frozen": False,
+                "note": (
+                    "The 3-day card uses the same model as the 7-day and 30-day cards. "
+                    "Every reading can then add or subtract on top. It does not replace the 30-day card."
+                ),
+                "week": voted,
+            }
+            continue
         for region_id, mag in ISSUED_TARGETS:
             hits = fresh_hits(catalog, REGIONS[region_id], mag, days, horizon).astype(float)
             roll = rolling_climate_series(hits, days, horizon=horizon)
@@ -2312,29 +2410,6 @@ def _short_horizon_cards(
                     "beside_30_day": True,
                 }
             )
-    from eqpred.eval.lineup import open_three_day_rows
-
-    vote_closed = np.asarray(days + pd.Timedelta(days=3) <= catalog_end)
-    vote_train, vote_hold = purged_train_hold(
-        days, vote_closed, train_end, holdout_start, purge=3
-    )
-    voted = open_three_day_rows(
-        design=design,
-        catalog=catalog,
-        days=days,
-        train_mask=vote_train,
-        hold_mask=vote_hold,
-        horizon=3,
-    )
-    draft = {
-        "writes_issued_p": False,
-        "horizon_days": 3,
-        "same_as_frozen": False,
-        "note": "The 3-day card is open. Every reading can move it. It does not replace the 30-day card.",
-        "week": voted,
-    }
-    if voted:
-        rows = [row for row in rows if int(row.get("horizon_days") or 0) != 3] + voted
     return rows, draft
 
 
@@ -2597,7 +2672,7 @@ def seal_mainshock_file(root: Path | None = None) -> dict[str, Any] | None:
     sealed = _seal_report(pack)
     dest = data_dir(root) / "eval"
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / "mainshock.json").write_text(json.dumps(sealed, indent=2, default=str), encoding="utf-8")
+    write_json(dest / "mainshock.json", sealed, default=str)
     return sealed
 
 
@@ -2618,8 +2693,9 @@ def _english(report: dict[str, Any]) -> str:
     shared = [r for r in regions if r.get("issued_from") == "shared"]
     if shared:
         bits.append(
-            "Issued p is one shared encoder over every live family, with a small mix head per box. "
-            "Box specialists stay as sidecars. Leftover only joins if late-train and the sealed 2019–2023 slice both beat climate."
+            "Issued p is one shared encoder over every live family, lifted onto each box's rolling five-year rate. "
+            "Box specialists stay as sidecars. The leftover score is one more column in that encoder; "
+            "its check-year and 2019–2023 scores are printed, not used to let it in."
         )
     tour_used = [r for r in regions if r.get("issued_from") in {"pooled", "shrunk"}]
     if tour_used and not shared:
@@ -3380,7 +3456,7 @@ def refit_sitout_draft(
     }
     report["week"] = frozen_week
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    write_json(dest, report, default=str)
     return report["draft"]
 
 
@@ -3646,14 +3722,15 @@ def run_mainshock(
         catalog_end=catalog_end,
         root=root,
     )
-    from eqpred.eval.vote_freeze import seal_new_mornings
+    from eqpred.eval.vote_freeze import save_model_calls, seal_new_mornings
 
+    save_model_calls(report, root)
     seal_new_mornings(design=design, catalog=catalog, days=days, root=root)
     report = _seal_report(report)
     dest = data_dir(root) / "eval"
     dest.mkdir(parents=True, exist_ok=True)
     _write_csep_sidecar(report, dest)
-    (dest / "mainshock.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    write_json(dest / "mainshock.json", report, default=str)
     return report
 
 
@@ -3787,7 +3864,7 @@ def run_last_week_mainshock(
     sealed = _seal_report(existing)
     dest = data_dir(root) / "eval"
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / "mainshock.json").write_text(json.dumps(sealed, indent=2, default=str), encoding="utf-8")
+    write_json(dest / "mainshock.json", sealed, default=str)
     return sealed
 
 
@@ -3893,7 +3970,7 @@ def run_locked_thin_mainshock(
     sealed = _seal_report(existing)
     dest = data_dir(root) / "eval"
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / "mainshock.json").write_text(json.dumps(sealed, indent=2, default=str), encoding="utf-8")
+    write_json(dest / "mainshock.json", sealed, default=str)
     (dest / "locked_thin.json").write_text(
         json.dumps(sealed.get("locked_thin") or locked, indent=2, default=str),
         encoding="utf-8",

@@ -194,6 +194,41 @@ def build_unwin_daily(folder: Path, *, workers: int = 4) -> pd.DataFrame:
     return frame
 
 
+def cusp_onset_rows(
+    gates: pd.DataFrame,
+    *,
+    quiet_yesterday: np.ndarray | None = None,
+    storm_today: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """Unwin gates over New Zealand longitude, and only on a storm-onset morning.
+
+    A daily mean of every gate is not this index. Onset means yesterday was
+    quiet and today is not. Gates need a latitude and a longitude.
+    """
+    needed = {"observed_at", "glat", "glon", "power"}
+    if gates.empty or not needed.issubset(gates.columns):
+        return pd.DataFrame(columns=["observed_at", "sdarn_cusp_power"])
+    work = gates.copy()
+    work["glat"] = pd.to_numeric(work["glat"], errors="coerce")
+    work["glon"] = pd.to_numeric(work["glon"], errors="coerce")
+    work["power"] = pd.to_numeric(work["power"], errors="coerce")
+    lon = work["glon"].where(work["glon"] <= 180, work["glon"] - 360)
+    cusp = work["glat"].between(-80.0, -65.0) & lon.between(165.0, 180.0) & work["power"].notna()
+    work = work.loc[cusp]
+    if work.empty:
+        return pd.DataFrame(columns=["observed_at", "sdarn_cusp_power"])
+    day = pd.to_datetime(work["observed_at"], utc=True).dt.floor("D")
+    day.name = "observed_at"
+    daily = work.groupby(day, as_index=False)["power"].mean()
+    daily = daily.rename(columns={"power": "sdarn_cusp_power"})
+    if quiet_yesterday is None or storm_today is None:
+        return daily
+    onset = np.asarray(quiet_yesterday, dtype=bool) & np.asarray(storm_today, dtype=bool)
+    if len(onset) != len(daily):
+        return daily.iloc[0:0]
+    return daily.loc[onset].reset_index(drop=True)
+
+
 def unwin_daily_path(root: Path | None = None) -> Path:
     return raw_dir(root) / SOURCE / "daily.parquet"
 

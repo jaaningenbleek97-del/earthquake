@@ -1,12 +1,18 @@
 import json
 from pathlib import Path
 
-from eqpred.ingest.comcat_versions import parse_origin_versions
+from eqpred.ingest.comcat_versions import _ms_to_utc, parse_origin_versions
 from eqpred.ingest.run import merge_keyed_frames
 from eqpred.stamp import parse_utc
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "comcat_detail_versions.json"
+
+
+def test_version_timestamps_before_1970_do_not_vanish():
+    stamp = _ms_to_utc(-315619200000)  # 1960-01-01
+    assert stamp is not None
+    assert stamp.year == 1960
 
 
 def test_parse_origin_versions_keeps_revision_order():

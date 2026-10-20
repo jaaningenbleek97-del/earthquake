@@ -15,8 +15,10 @@ import numpy as np
 import pandas as pd
 
 from eqpred.eval.frozen import frozen_dir, read_frozen
+from eqpred.eval.honest import CARD_KIND_PROSPECTIVE, classify_card_kind, counts_as_prospective
 from eqpred.eval.skill import MIN_N, information_gain
 from eqpred.records import iso
+from eqpred.safe_io import file_lock, read_json, write_json
 
 
 def votes_path(root: Path | None = None) -> Path:
@@ -38,7 +40,7 @@ def read_ledger(root: Path | None = None) -> dict[str, Any]:
     path = ledger_path(root)
     if not path.exists():
         return {"entries": []}
-    return json.loads(path.read_text(encoding="utf-8"))
+    return read_json(path)
 
 
 def recipe_hash(boxes: dict[str, Any]) -> str:
@@ -64,19 +66,20 @@ def recipe_hash(boxes: dict[str, Any]) -> str:
 
 def install_votes(fit: dict[str, Any], root: Path | None = None) -> dict[str, Any]:
     """Lock the current 3-day weights. A file that already exists stays."""
-    existing = read_votes(root)
-    if existing:
-        return existing
-    boxes = fit.get("boxes") or {}
-    payload = {
-        "locked_at": iso(datetime.now(timezone.utc)),
-        "horizon_days": int(fit.get("horizon_days") or 3),
-        "recipe_hash": recipe_hash(boxes),
-        "boxes": boxes,
-        "note": "3-day vote weights locked for scoring. A later fit is the working model.",
-    }
-    votes_path(root).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return payload
+    with file_lock(votes_path(root)):
+        existing = read_votes(root)
+        if existing:
+            return existing
+        boxes = fit.get("boxes") or {}
+        payload = {
+            "locked_at": iso(datetime.now(timezone.utc)),
+            "horizon_days": int(fit.get("horizon_days") or 3),
+            "recipe_hash": recipe_hash(boxes),
+            "boxes": boxes,
+            "note": "3-day vote weights locked for scoring. A later fit is the working model.",
+        }
+        write_json(votes_path(root), payload)
+        return payload
 
 
 def _jsonable(value: float | None) -> float | None:
@@ -89,21 +92,33 @@ def _jsonable(value: float | None) -> float | None:
 
 
 def _window_open(issue_day: str, horizon: int, written_at: datetime) -> bool:
-    """True when the card was written before that morning's window closed."""
-    issue = pd.Timestamp(issue_day, tz="UTC")
-    closes = issue + pd.Timedelta(days=int(horizon))
-    written = pd.Timestamp(written_at)
-    if written.tzinfo is None:
-        written = written.tz_localize("UTC")
-    return written <= closes
+    """True when the card was written on or near issue morning (not mid-window).
+
+    Horizon is kept for callers; prospective status matches classify_card_kind.
+    """
+    _ = horizon
+    return classify_card_kind(issue_day, written_at) == CARD_KIND_PROSPECTIVE
 
 
-def _entry_key(entry: dict[str, Any]) -> tuple[int, str, str]:
-    return (int(entry.get("horizon_days") or 0), str(entry.get("region") or ""), str(entry.get("issue_day") or ""))
+def _entry_key(entry: dict[str, Any]) -> tuple[str, int, str, str]:
+    return (
+        str(entry.get("model_id") or ""),
+        int(entry.get("horizon_days") or 0),
+        str(entry.get("region") or ""),
+        str(entry.get("issue_day") or ""),
+    )
 
 
 def append_entries(rows: list[dict[str, Any]], *, root: Path | None = None, written_at: datetime | None = None) -> list[dict[str, Any]]:
-    """Add cards that are not already on file. An existing morning is left alone."""
+    """Add cards that are not already on file. An existing morning is left alone.
+
+    One run at a time edits the ledger, and the previous copy is kept as ledger.json.bak.
+    """
+    with file_lock(ledger_path(root)):
+        return _append_entries_locked(rows, root=root, written_at=written_at)
+
+
+def _append_entries_locked(rows: list[dict[str, Any]], *, root: Path | None, written_at: datetime | None) -> list[dict[str, Any]]:
     ledger = read_ledger(root)
     entries = list(ledger.get("entries") or [])
     seen = {_entry_key(entry) for entry in entries}
@@ -115,10 +130,11 @@ def append_entries(rows: list[dict[str, Any]], *, root: Path | None = None, writ
         horizon = int(row.get("horizon_days") or 0)
         if not issue_day or not region or horizon <= 0:
             continue
-        key = (horizon, region, issue_day)
+        key = _entry_key(row)
         if key in seen:
             continue
         entry = {
+            "model_id": str(row.get("model_id") or ""),
             "horizon_days": horizon,
             "region": region,
             "label": row.get("label"),
@@ -142,8 +158,36 @@ def append_entries(rows: list[dict[str, Any]], *, root: Path | None = None, writ
         seen.add(key)
         added.append(entry)
     ledger["entries"] = entries
-    ledger_path(root).write_text(json.dumps(ledger, indent=2), encoding="utf-8")
+    write_json(ledger_path(root), ledger, backup=True)
     return added
+
+
+def save_model_calls(report: dict[str, Any] | None, root: Path | None = None) -> list[dict[str, Any]]:
+    """Lock every call a model has already made. A later fit does not replace it."""
+    if not report:
+        return []
+    rows: list[dict[str, Any]] = []
+    for row in report.get("week") or []:
+        rows.append({**row, "model_id": "published"})
+    for row in (report.get("draft") or {}).get("week") or []:
+        rows.append({**row, "model_id": "working.30d"})
+    for row in report.get("short_horizons") or []:
+        horizon = int(row.get("horizon_days") or 0)
+        model = "open.3d" if horizon == 3 else f"card.{horizon}d"
+        rows.append({**row, "model_id": str(row.get("model_id") or model)})
+    legacy = {
+        (int(entry.get("horizon_days") or 0), str(entry.get("region") or ""), str(entry.get("issue_day") or ""))
+        for entry in read_ledger(root).get("entries") or []
+        if not str(entry.get("model_id") or "")
+    }
+    fresh = []
+    for row in rows:
+        if str(row.get("model_id") or "") == "published":
+            old = (int(row.get("horizon_days") or 0), str(row.get("region") or ""), str(row.get("issue_day") or ""))
+            if old in legacy:
+                continue
+        fresh.append(row)
+    return append_entries(fresh, root=root)
 
 
 def _mark_frozen(row: dict[str, Any], locked_at: str) -> dict[str, Any]:
@@ -305,7 +349,7 @@ def _ledger_rows(rows: list[dict[str, Any]], *, root: Path | None) -> list[dict[
         ):
             if saved.get(field) is not None:
                 kept[field] = saved[field]
-        kept["prospective"] = bool(saved.get("prospective"))
+        kept["prospective"] = counts_as_prospective(saved)
         out.append(kept)
     return out
 
@@ -561,7 +605,9 @@ def score_frozen_ledger(quakes: pd.DataFrame, root: Path | None = None) -> dict[
         group = [
             entry
             for entry in entries
-            if int(entry.get("horizon_days") or 0) == horizon and entry.get("prospective")
+            if int(entry.get("horizon_days") or 0) == horizon
+            and counts_as_prospective(entry)
+            and str(entry.get("model_id") or "") in {"", "published"}
         ]
         closed_p: list[float] = []
         closed_y: list[float] = []
@@ -576,7 +622,7 @@ def score_frozen_ledger(quakes: pd.DataFrame, root: Path | None = None) -> dict[
                 if mag is None or region_id not in REGIONS:
                     continue
                 issue_days = pd.DatetimeIndex([pd.Timestamp(row["issue_day"], tz="UTC") for row in rows])
-                hits = fresh_hits(quakes, REGIONS[region_id], mag, issue_days, horizon)
+                hits = fresh_hits(quakes, REGIONS[region_id], mag, issue_days, horizon, label_version=1)
                 for entry, hit in zip(rows, hits, strict=True):
                     issue = pd.Timestamp(entry["issue_day"], tz="UTC")
                     if catalog_end < issue + pd.Timedelta(days=horizon):
@@ -605,3 +651,123 @@ def score_frozen_ledger(quakes: pd.DataFrame, root: Path | None = None) -> dict[
             "plain": _plain(horizon, n_prospective, n_closed, n_hits, ig),
         }
     return out
+
+
+_SAVED_REGION_ORDER = {"global": 0, "hikurangi": 1, "alpine": 2, "kermadec": 3}
+
+
+def saved_model_name(model_id: str, horizon: int) -> str:
+    """Plain name for a locked call. The exam and the working cards stay distinct."""
+    mid = str(model_id or "")
+    if mid in {"", "published"} and horizon == 30:
+        return "Locked 30-day exam"
+    if mid in {"", "published"} and horizon == 3:
+        return "Locked 3-day exam"
+    if mid == "working.30d":
+        return "Working 30-day"
+    if mid == "open.3d":
+        return "3-day card"
+    if mid.startswith("card."):
+        return f"{horizon}-day card"
+    return mid or "Saved call"
+
+
+def saved_call_rows(quakes: pd.DataFrame | None = None, root: Path | None = None) -> dict[str, Any]:
+    """Every locked call, with a hit once its window has closed."""
+    from eqpred.catalog import load_comcat
+    from eqpred.eval.decluster import fresh_hits
+    from eqpred.regions import REGIONS
+    from eqpred.stamp import parse_utc
+
+    entries = list(read_ledger(root).get("entries") or [])
+    if quakes is None:
+        quakes = load_comcat(root)
+    catalog_end = None
+    if quakes is not None and len(quakes) and "observed_at" in quakes.columns:
+        observed = parse_utc(quakes["observed_at"])
+        if len(observed):
+            catalog_end = observed.max()
+    prepared: list[dict[str, Any]] = []
+    groups: dict[tuple[str, float, int], list[int]] = {}
+    for entry in entries:
+        region = str(entry.get("region") or "")
+        horizon = int(entry.get("horizon_days") or 0)
+        issue = str(entry.get("issue_day") or "")[:10]
+        mag = entry.get("magnitude_min")
+        if not region or horizon <= 0 or not issue or mag is None:
+            continue
+        groups.setdefault((region, float(mag), horizon), []).append(len(prepared))
+        prepared.append(entry)
+    closed_hit: dict[int, bool | None] = {}
+    for (region, mag, horizon), idxs in groups.items():
+        if region not in REGIONS or catalog_end is None:
+            for idx in idxs:
+                closed_hit[idx] = None
+            continue
+        days = pd.DatetimeIndex(
+            [pd.Timestamp(str(prepared[idx]["issue_day"])[:10], tz="UTC") for idx in idxs]
+        )
+        hits = fresh_hits(quakes, REGIONS[region], mag, days, horizon)
+        for idx, hit in zip(idxs, hits, strict=True):
+            issue = pd.Timestamp(str(prepared[idx]["issue_day"])[:10], tz="UTC")
+            if catalog_end < issue + pd.Timedelta(days=horizon):
+                closed_hit[idx] = None
+            else:
+                closed_hit[idx] = bool(hit)
+    rows: list[dict[str, Any]] = []
+    for idx, entry in enumerate(prepared):
+        hit = closed_hit.get(idx)
+        horizon = int(entry.get("horizon_days") or 0)
+        if hit is None:
+            status, status_plain = "waiting", "still waiting"
+        elif hit:
+            status, status_plain = "hit", "first shock"
+        else:
+            status, status_plain = "miss", "no first shock"
+        model_id = str(entry.get("model_id") or "")
+        rows.append(
+            {
+                "model_id": model_id,
+                "model": saved_model_name(model_id, horizon),
+                "region": str(entry.get("region") or ""),
+                "label": entry.get("label") or entry.get("region"),
+                "horizon_days": horizon,
+                "magnitude_min": entry.get("magnitude_min"),
+                "issue_day": str(entry.get("issue_day") or "")[:10],
+                "p": entry.get("p"),
+                "chance_plain": entry.get("chance_plain"),
+                "climatology_p": entry.get("climatology_p"),
+                "climatology_chance_plain": entry.get("climatology_chance_plain"),
+                "status": status,
+                "status_plain": status_plain,
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            _SAVED_REGION_ORDER.get(str(row["region"]), 9),
+            -int(row["horizon_days"]),
+            str(row["model"]),
+        )
+    )
+    rows.sort(key=lambda row: str(row["issue_day"]), reverse=True)
+    n_hits = sum(1 for row in rows if row["status"] == "hit")
+    n_closed = sum(1 for row in rows if row["status"] != "waiting")
+    n_waiting = len(rows) - n_closed
+    if not rows:
+        plain = "No saved calls yet."
+    elif n_closed == 0:
+        plain = f"{len(rows)} saved calls. Every window is still open."
+    else:
+        shocks = "1 first shock" if n_hits == 1 else f"{n_hits} first shocks"
+        plain = (
+            f"{len(rows)} saved calls. {shocks} in {n_closed} closed windows. "
+            f"{n_waiting} still waiting."
+        )
+    return {
+        "rows": rows,
+        "n": len(rows),
+        "n_waiting": n_waiting,
+        "n_closed": n_closed,
+        "n_hits": n_hits,
+        "plain": plain,
+    }

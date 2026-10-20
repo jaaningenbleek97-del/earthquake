@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -27,6 +29,25 @@ DAVIDSON_BURNS_FAMILIES = (
     "volcano",
 )
 AGREE_MIN = 3
+# 3-day cards only. Earth-wide stays at magnitude 7. Hikurangi and Alpine
+# step to 4.5, the bottom of the catalog. Kermadec steps to 5.
+THREE_DAY_MAG = {
+    "hikurangi": 4.5,
+    "alpine": 4.5,
+    "kermadec": 5.0,
+}
+
+
+def three_day_targets() -> tuple[tuple[str, float], ...]:
+    """The 3-day question. Same places, with the lower magnitude floors."""
+    from eqpred.eval.mainshock import ISSUED_TARGETS
+
+    return tuple((rid, three_day_magnitude(rid, mag)) for rid, mag in ISSUED_TARGETS)
+
+
+def three_day_magnitude(region_id: str, issued_mag: float) -> float:
+    """Magnitude floor for the open 3-day card. The 30-day card keeps issued_mag."""
+    return float(THREE_DAY_MAG.get(str(region_id), issued_mag))
 
 
 def watch_agreement(votes: list[tuple[str, float | None]]) -> dict[str, Any]:
@@ -169,7 +190,9 @@ def _z_from_stats(block: np.ndarray, stats: list[tuple[float, float] | None]) ->
         present |= ok
     if not parts:
         return np.full(block.shape[0], np.nan)
-    with np.errstate(all="ignore"):
+    with warnings.catch_warnings():
+        # A morning where every column is blank is expected; it stays blank.
+        warnings.simplefilter("ignore", category=RuntimeWarning)
         mean = np.nanmean(np.vstack(parts), axis=0)
     return np.where(present, mean, np.nan)
 
@@ -238,6 +261,20 @@ def _measurement_group(name: str) -> str:
     low = base.lower()
     if low.startswith(("goes_proton", "proton_")):
         return "solar protons"
+    if low.startswith(("cmt_", "geonet_cmt_")):
+        return "focal mechanisms"
+    if low.startswith(("sws_", "swsdb_")):
+        return "mantle splitting"
+    if low.startswith("n_iface_"):
+        return "interface quakes"
+    if low.startswith("n_slab_"):
+        return "slab quakes"
+    if low.startswith("nied_"):
+        return "Japan tremor"
+    if low.startswith("obs_"):
+        return "offshore campaign"
+    if low.startswith("rupture_"):
+        return "rupture models"
     if low.startswith("neutron"):
         return "neutrons"
     if low.startswith("grace_"):
@@ -276,15 +313,49 @@ def _measurement_group(name: str) -> str:
     }.get(head, head)
 
 
-def _share_ceiling(votes: list[np.ndarray], cap: float) -> tuple[list[np.ndarray], np.ndarray]:
+# A solar-watch group may change the usual rate by at most half.
+# The whole pile may rise by one and a half times the usual rate, and may not cut it by more than half.
+SOLAR_RATE_SHARE = 0.5
+PILE_UP = 1.5
+PILE_DOWN = 0.5
+
+
+def group_rate_cap(base_cap: float, climate: np.ndarray) -> np.ndarray:
+    """Point stop for one measurement, as a fraction of this fault's usual rate."""
+    rate = np.asarray(climate, dtype=float)
+    rate = np.where(np.isfinite(rate), rate, 0.0)
+    rate = np.clip(rate, 0.0, 1.0)
+    share = SOLAR_RATE_SHARE * (float(base_cap) / WATCH_CAP)
+    return share * rate
+
+
+def pile_factor(added: np.ndarray, climate: np.ndarray) -> np.ndarray:
+    """Keep the chance between half and two and a half times the usual rate."""
+    rate = np.asarray(climate, dtype=float)
+    rate = np.where(np.isfinite(rate), rate, 0.0)
+    total = np.asarray(added, dtype=float)
+    lo = -PILE_DOWN * rate
+    hi = PILE_UP * rate
+    factor = np.ones(total.shape, dtype=float)
+    up = total > hi
+    down = total < lo
+    factor[up] = np.divide(hi[up], total[up], out=np.ones(int(up.sum())), where=np.abs(total[up]) > 1e-15)
+    factor[down] = np.divide(lo[down], total[down], out=np.ones(int(down.sum())), where=np.abs(total[down]) > 1e-15)
+    return factor
+
+
+def _share_ceiling(votes: list[np.ndarray], cap: float | np.ndarray) -> tuple[list[np.ndarray], np.ndarray]:
     """Shrink a measurement's readings so their sum stops at `cap`. Each keeps its share."""
     if not votes:
         return [], np.zeros(0)
     filled = [np.where(np.isfinite(vote), vote, 0.0) for vote in votes]
     total = np.sum(filled, axis=0)
+    cap_arr = np.asarray(cap, dtype=float)
+    if cap_arr.ndim == 0:
+        cap_arr = np.full(total.shape, float(cap_arr))
     factor = np.ones(total.shape, dtype=float)
-    over = np.abs(total) > cap
-    factor[over] = cap / np.abs(total[over])
+    over = np.abs(total) > cap_arr
+    factor[over] = cap_arr[over] / np.abs(total[over])
     return [vote * factor for vote in filled], total * factor
 
 
@@ -304,8 +375,11 @@ def open_three_day_rows(
     train_mask: np.ndarray,
     hold_mask: np.ndarray,
     horizon: int = 3,
+    shared_base: dict[str, np.ndarray] | None = None,
+    series_out: dict[str, dict[str, Any]] | None = None,
+    targets: tuple[tuple[str, float], ...] | None = None,
 ) -> list[dict[str, Any]]:
-    """Every measurement moves the 3-day chance. No skill test. Each vote has a ceiling."""
+    """Shared-model chance, then every reading adds on top. Each vote has a ceiling."""
     from eqpred.eval.decluster import fresh_hits
     from eqpred.eval.honest import fit_val_split
     from eqpred.eval.hunt import driver_family
@@ -324,7 +398,12 @@ def open_three_day_rows(
     latest = len(days) - 1
     groups = _reading_groups(names)
     rows: list[dict[str, Any]] = []
-    for region_id, mag in ISSUED_TARGETS:
+    pairs = (
+        targets
+        if targets is not None
+        else tuple((rid, three_day_magnitude(rid, mag)) for rid, mag in ISSUED_TARGETS)
+    )
+    for region_id, mag in pairs:
         hits = fresh_hits(catalog, REGIONS[region_id], mag, days, horizon).astype(float)
         roll = rolling_climate_series(hits, days, horizon=horizon)
         climate_series = np.where(np.isfinite(roll), roll, recent_climate(hits, days, train_mask))
@@ -348,11 +427,16 @@ def open_three_day_rows(
                 n_blank_today += 1
             grouped.setdefault(_measurement_group(base), []).append((base, vote, np.isfinite(z)))
         group_rows: list[dict[str, Any]] = []
+        held: list[tuple[str, list, list, np.ndarray]] = []
         for label, members in grouped.items():
-            cap = vote_cap(driver_family(members[0][0]))
+            cap = group_rate_cap(vote_cap(driver_family(members[0][0])), climate_series)
             shared, group_total = _share_ceiling([vote for _base, vote, _known in members], cap)
+            held.append((label, members, shared, group_total))
             added = added + group_total
-            today_group = float(group_total[latest])
+        shrink = pile_factor(added, climate_series)
+        added = added * shrink
+        for label, members, shared, group_total in held:
+            today_group = float(group_total[latest] * shrink[latest])
             if abs(today_group) >= 0.0005:
                 group_rows.append(
                     {
@@ -364,7 +448,7 @@ def open_three_day_rows(
             for (base, vote, known), scaled in zip(members, shared, strict=True):
                 if not known[latest]:
                     continue
-                today_vote = float(scaled[latest])
+                today_vote = float(scaled[latest] * shrink[latest])
                 if abs(today_vote) < NOTICE:
                     continue
                 reports.append(
@@ -374,9 +458,21 @@ def open_three_day_rows(
                         "points_plain": _points(today_vote),
                     }
                 )
-        p_series = np.clip(climate_series + added, 1e-6, 1.0 - 1e-6)
-        p_series = np.clip(np.where(np.isfinite(p_series), p_series, climate_series), 1e-6, 1.0 - 1e-6)
+        start = climate_series
+        model = None if shared_base is None else shared_base.get(region_id)
+        if model is not None and len(np.asarray(model)) == len(days):
+            model = np.asarray(model, dtype=float)
+            start = np.where(np.isfinite(model), model, climate_series)
+        p_series = np.clip(start + added, 1e-6, 1.0 - 1e-6)
+        p_series = np.clip(np.where(np.isfinite(p_series), p_series, start), 1e-6, 1.0 - 1e-6)
+        if series_out is not None:
+            series_out[region_id] = {
+                "p": p_series,
+                "base": np.asarray(start, dtype=float),
+                "groups": {label: np.asarray(total, dtype=float) for label, _members, _shared, total in held},
+            }
         climate = float(climate_series[latest]) if np.isfinite(climate_series[latest]) else float("nan")
+        base_p = float(start[latest]) if np.isfinite(start[latest]) else float("nan")
         p = float(p_series[latest])
         exam = skill_beats_climate(p_series[hold_mask], hits[hold_mask], roll[hold_mask])
         ig = exam.get("information_gain")
@@ -397,6 +493,8 @@ def open_three_day_rows(
                 "horizon_days": horizon,
                 "p": p,
                 "chance_plain": _chance(p),
+                "base_p": None if not np.isfinite(base_p) else base_p,
+                "base_chance_plain": _chance(base_p),
                 "climatology_p": None if not np.isfinite(climate) else climate,
                 "climatology_chance_plain": _chance(climate),
                 "issue_day": days[latest].date().isoformat(),
@@ -420,7 +518,7 @@ def open_three_day_rows(
             }
         )
         print(
-            f"3-day open {region_id} {_chance(p)} typical {_chance(climate)} {rows[-1]['lineup_plain']}",
+            f"3-day open {region_id} M{mag:g} {_chance(p)} model {_chance(base_p)} typical {_chance(climate)} {rows[-1]['lineup_plain']}",
             flush=True,
         )
     return rows

@@ -8,7 +8,6 @@ credentials exist. It never wget's the global archive.
 """
 
 import json
-import os
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd

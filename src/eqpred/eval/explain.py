@@ -217,7 +217,7 @@ def build_explain(root: Path | None = None) -> dict[str, Any]:
 
     from eqpred.eval.decluster import fresh_hits
     from eqpred.eval.mainshock import ISSUED_TARGETS, prepare_issued
-    from eqpred.eval.vote_freeze import read_ledger, read_votes
+    from eqpred.eval.vote_freeze import read_votes
     from eqpred.eval.waiting import odd_box
     from eqpred.regions import REGIONS
     from eqpred.stamp import utc_ts
@@ -293,10 +293,22 @@ def _saved_window_shocks(catalog: pd.DataFrame, issue: pd.Timestamp, root: Path 
     from eqpred.eval.vote_freeze import read_ledger
     from eqpred.regions import REGIONS
 
+    closes = issue + pd.Timedelta(days=30)
+
+    def _saved_before_close(entry: dict[str, Any]) -> bool:
+        written = entry.get("written_at")
+        if not written:
+            return False
+        stamp = pd.Timestamp(written)
+        stamp = stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+        return stamp <= closes
+
     saved = [
         entry
         for entry in (read_ledger(root).get("entries") or [])
-        if int(entry.get("horizon_days") or 0) == 30 and entry.get("prospective") and str(entry.get("issue_day") or "")[:10] == str(issue.date())
+        if int(entry.get("horizon_days") or 0) == 30
+        and str(entry.get("issue_day") or "")[:10] == str(issue.date())
+        and _saved_before_close(entry)
     ]
     if not saved:
         return []
@@ -305,7 +317,7 @@ def _saved_window_shocks(catalog: pd.DataFrame, issue: pd.Timestamp, root: Path 
     for region_id, mag in ISSUED_TARGETS:
         if not any(str(entry.get("region")) == region_id for entry in saved):
             continue
-        hit = bool(fresh_hits(catalog, REGIONS[region_id], mag, days, 30)[0])
+        hit = bool(fresh_hits(catalog, REGIONS[region_id], mag, days, 30, label_version=1)[0])
         if hit:
             found.append({"region": region_id, "label": _place(region_id)})
     return found

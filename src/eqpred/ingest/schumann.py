@@ -73,8 +73,6 @@ def _zip_directory(url: str) -> bytes:
     req = urllib.request.Request(url, headers={**UA, "Range": "bytes=-65536"})
     with urllib.request.urlopen(req, timeout=120) as response:
         tail = response.read()
-        span = response.headers.get("Content-Range") or ""
-    tail_start = int(span.split(" ")[1].split("-")[0]) if "bytes" in span else 0
     marker = tail.rfind(b"PK\x06\x06")
     if marker >= 0:
         fields = struct.unpack_from("<QHHIIQQQQ", tail, marker + 4)

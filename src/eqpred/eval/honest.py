@@ -161,13 +161,11 @@ def fit_val_split(
         val_mask = np.zeros(len(train_mask), dtype=bool)
         if idx.size > 280:
             val_start = days[idx[-365]]
-            fit_mask = train_mask & (days + gap <= val_start)
-            val_mask = train_mask & (days >= val_start)
-            if int(fit_mask.sum()) < 80 or not val_mask.any():
-                fit_mask = train_mask.copy()
-                val_mask = np.zeros(len(train_mask), dtype=bool)
-                val_mask[idx[-365:]] = True
-                fit_mask[idx[-365:]] = False
+            fit_try = train_mask & (days + gap <= val_start)
+            val_try = train_mask & (days >= val_start)
+            # No validation beats a validation year whose labels overlap the fit.
+            if int(fit_try.sum()) >= 80 and val_try.any():
+                fit_mask, val_mask = fit_try, val_try
     return fit_mask, val_mask
 
 
@@ -204,6 +202,18 @@ def classify_card_kind(
     if written <= issued + pd.Timedelta(days=int(grace_days)):
         return CARD_KIND_PROSPECTIVE
     return CARD_KIND_RETROSPECTIVE
+
+
+def counts_as_prospective(entry: dict) -> bool:
+    """A saved card is prospective only if it was flagged so and written by its issue morning (+ grace).
+
+    Read-time check, so rows already on file are never rewritten.
+    """
+    issue = entry.get("issue_day") or entry.get("issued_at")
+    written = entry.get("written_at")
+    if not entry.get("prospective") or not issue or not written:
+        return False
+    return classify_card_kind(issue, written) == CARD_KIND_PROSPECTIVE
 
 
 def derived_model_column(column: str) -> bool:

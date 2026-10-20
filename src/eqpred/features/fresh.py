@@ -6,8 +6,6 @@ Turns sources we already have into anomalies, streaks, and cheap planet
 geometry so the hunter and the fresh-shock model see more than raw daily levels.
 """
 
-import math
-
 import numpy as np
 import pandas as pd
 

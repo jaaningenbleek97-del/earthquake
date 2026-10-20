@@ -10,7 +10,7 @@ NCEI SGPS 5-minute averages begin 2020-11-01. MPS-HI covers 2017 onward.
 """
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable
 

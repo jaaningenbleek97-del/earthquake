@@ -20,7 +20,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from eqpred.catalog import load_comcat
-from eqpred.eval.brain import MIN_SCORE, MIN_TRAIN, _brier, _design, _driver_columns, _impute
+from eqpred.eval.brain import MIN_TRAIN, _brier, _design, _driver_columns, _impute
 from eqpred.eval.decluster import fresh_hits
 from eqpred.eval.horizon import HORIZON_DAYS
 from eqpred.eval.honest import purged_train_hold, rolling_climate_series
@@ -217,15 +217,11 @@ def fit_leftover_region(
                 for col in sched_cols
                 if not str(col).split("__lag", 1)[0].lower().startswith("sse_")
             ]
-    y_after_climate = hits - regime
-
     sched_x, _sched_names = _design(work, sched_cols, lags=SCHEDULE_LAGS)
     left_x, left_names = _design(work, left_cols, lags=LEFTOVER_LAGS)
     sched_train, sched_all = _impute(sched_x[train_mask] if sched_x.size else sched_x, sched_x)
     left_train, left_all = _impute(left_x[train_mask] if left_x.size else left_x, left_x)
 
-    sched_model = _fit_ridge(sched_train, y_after_climate[train_mask], RIDGE_SCHEDULE)
-    sched_hat = _bound_residual(_predict(sched_model, sched_all, len(hits)))
     schedule_p = _logistic_prob(sched_train, hits[train_mask], sched_all, len(hits))
     y_leftover = hits - schedule_p
     left_model = _fit_ridge(left_train, y_leftover[train_mask], RIDGE_LEFTOVER)

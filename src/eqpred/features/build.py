@@ -16,7 +16,7 @@ from eqpred.features.migration import migration_frame
 from eqpred.catalog import apply_completeness, event_available_as, load_comcat, load_comcat_versions
 from eqpred.ingest.run import latest_raw, try_latest_raw
 from eqpred.paths import feature_dir
-from eqpred.stamp import parse_utc, utc_ts
+from eqpred.stamp import merge_daily, parse_utc, utc_ts
 
 
 def _asof_available(frame: pd.DataFrame, days: pd.DatetimeIndex, value_cols: list[str]) -> pd.DataFrame:
@@ -211,6 +211,9 @@ def build_features(
 
     feat = attach_graph_features(feat, quakes, train_end=train_end)
     feat = attach_anomaly_features(feat, train_end=train_end)
+    from eqpred.features.deep_counts import attach_deep_features
+
+    feat = attach_deep_features(feat, quakes, root)
 
     dest = feature_dir(root) / "global_daily.parquet"
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -403,7 +406,9 @@ def _join_wave2(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFram
             feat = feat.merge(_asof_available(donki, days, cols), on="issue_time", how="left")
     planets = planetary_frame(pd.DatetimeIndex(feat["issue_time"]))
     feat = feat.merge(planets, on="issue_time", how="left")
-    return fresh_derived(feat)
+    from eqpred.features.quiet_residual import quiet_residual_columns
+
+    return quiet_residual_columns(fresh_derived(feat))
 
 
 def _nz_gnss_mean(frame: pd.DataFrame) -> pd.DataFrame:
@@ -675,7 +680,14 @@ def _join_superdarn(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.Data
 
 
 def _join_vlf(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
-    return _join_prefix(feat, days, "vlf.public", "vlf_", root)
+    feat = _join_prefix(feat, days, "vlf.public", "vlf_", root)
+    from eqpred.ingest.aardvark import read_local_aardvark
+
+    local = read_local_aardvark(root)
+    if local.empty:
+        return feat
+    cols = [c for c in ("aardvark_nwc_amp", "aardvark_nwc_phase") if c in local.columns]
+    return feat.merge(_asof_available(local, days, cols), on="issue_time", how="left")
 
 
 def _join_tir(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame:
@@ -762,15 +774,27 @@ def _utc_day(stamps: pd.Series) -> pd.Series:
 
 
 def yesterday_frame(frame: pd.DataFrame, issue: pd.Series, columns: list[str]) -> pd.DataFrame:
-    """Yesterday's reading on this morning. A later morning does not keep the last value."""
+    """Yesterday's reading on this morning. A later morning does not keep the last value.
+
+    Only readings with available_at <= issue morning are used. Delayed bulk
+    releases stay hidden until the morning they could have been known.
+    """
     issue_time = parse_utc(issue)
     empty = pd.DataFrame({"issue_time": issue_time, **{c: np.nan for c in columns}})
     if frame is None or frame.empty or "observed_at" not in getattr(frame, "columns", []):
         return empty
     work = frame.copy()
+    work["observed_at"] = parse_utc(work["observed_at"])
+    if "available_at" in work.columns:
+        work["available_at"] = parse_utc(work["available_at"])
+    else:
+        work["available_at"] = work["observed_at"]
+    work = work.dropna(subset=["observed_at", "available_at"])
     work["issue_time"] = _utc_day(work["observed_at"]) + pd.Timedelta(days=1)
+    # Embargo: the issue morning must already have the reading in hand.
+    work = work[work["available_at"] <= work["issue_time"]]
     cols = [c for c in columns if c in work.columns]
-    if not cols:
+    if not cols or work.empty:
         return empty
     work = work[["issue_time", *cols]].dropna(subset=["issue_time"])
     work = work.drop_duplicates("issue_time", keep="last")
@@ -805,7 +829,7 @@ def _join_infrasound(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.Dat
         if frame.empty:
             frame = extra
         else:
-            frame = frame.merge(extra[["observed_at", *cols]], on="observed_at", how="outer")
+            frame = merge_daily(frame, extra, cols)
     cols = [c for c in frame.columns if str(c).startswith("infra_")]
     return _attach_yesterday(feat, frame, cols)
 
@@ -824,7 +848,7 @@ def _join_pore(feat: pd.DataFrame, days: pd.DatetimeIndex, root) -> pd.DataFrame
         if frame.empty:
             frame = extra
         else:
-            frame = frame.merge(extra[["observed_at", *cols]], on="observed_at", how="outer")
+            frame = merge_daily(frame, extra, cols)
     cols = [c for c in frame.columns if str(c).startswith("pore_")]
     return _attach_yesterday(feat, frame, cols)
 

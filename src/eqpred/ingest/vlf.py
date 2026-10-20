@@ -7,15 +7,13 @@ is not in the public Zenodo dump (DHO/NAA/NRK only). Whatever public path
 answers is ingested as a foil, not a precursor.
 """
 
-import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from io import StringIO
 
 import pandas as pd
 
 from eqpred.ingest.http import fetch_bytes, fetch_text
-from eqpred.records import iso
 from eqpred.stamp import utc_ts
 
 SOURCE = "vlf.public"

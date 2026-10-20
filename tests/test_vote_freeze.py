@@ -93,19 +93,45 @@ def test_a_later_vote_model_does_not_replace_the_frozen_card(tmp_path):
     assert read_votes(tmp_path)["boxes"]["global"]["signals"][0]["scale"] == 0.02
 
 
-def test_ledger_keeps_the_first_writing_of_a_morning(tmp_path):
+def test_each_model_keeps_its_own_locked_call(tmp_path):
     early = datetime(2026, 9, 26, tzinfo=timezone.utc)
+    late = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    first = _row(0.2)
+    first["horizon_days"] = 30
+    first["issue_day"] = "2026-09-21"
+    first["model_id"] = "working.30d"
+    append_entries([first], root=tmp_path, written_at=early)
+    changed = dict(first, p=0.9)
+    append_entries([changed], root=tmp_path, written_at=late)
+    other = dict(first, model_id="open.3d", horizon_days=3, p=0.4)
+    append_entries([other], root=tmp_path, written_at=late)
+    entries = read_ledger(tmp_path)["entries"]
+    working = [entry for entry in entries if entry["model_id"] == "working.30d"]
+    opened = [entry for entry in entries if entry["model_id"] == "open.3d"]
+    assert len(working) == 1
+    assert working[0]["p"] == 0.2
+    assert len(opened) == 1
+    assert opened[0]["p"] == 0.4
+
+
+def test_ledger_keeps_the_first_writing_of_a_morning(tmp_path):
+    on_issue = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    mid_window = datetime(2026, 9, 26, tzinfo=timezone.utc)
     late = datetime(2026, 10, 1, tzinfo=timezone.utc)
     row = _row(0.2)
     row["horizon_days"] = 30
     row["issue_day"] = "2026-09-21"
-    append_entries([row], root=tmp_path, written_at=early)
+    append_entries([row], root=tmp_path, written_at=on_issue)
     changed = dict(row, p=0.9)
     append_entries([changed], root=tmp_path, written_at=late)
     entries = read_ledger(tmp_path)["entries"]
     assert len(entries) == 1
     assert entries[0]["p"] == 0.2
     assert entries[0]["prospective"] is True
+    mid = dict(row, model_id="working.30d.mid", p=0.3)
+    append_entries([mid], root=tmp_path, written_at=mid_window)
+    mid_rows = [entry for entry in read_ledger(tmp_path)["entries"] if entry["model_id"] == "working.30d.mid"]
+    assert mid_rows[0]["prospective"] is False
     closed = dict(row, horizon_days=3)
     append_entries([closed], root=tmp_path, written_at=late)
     three = [entry for entry in read_ledger(tmp_path)["entries"] if entry["horizon_days"] == 3]

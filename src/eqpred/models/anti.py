@@ -65,11 +65,11 @@ def fit_issued_anti(
 ) -> dict:
     from eqpred.catalog import load_comcat, load_comcat_versions
     from eqpred.eval.strategies import _window_hits
-    from eqpred.models.calibrate import issued_scale, load_calibration
+    from eqpred.models.calibrate import load_calibration
     from eqpred.models.coulomb import load_coulomb
     from eqpred.models.cusp import load_cusp
     from eqpred.models.etas import daily_background_and_cluster
-    from eqpred.models.gr import load_gr, rate_to_p
+    from eqpred.models.gr import load_gr
     from eqpred.models.migration import load_migration
     from eqpred.models.nowcast import load_nowcast
     from eqpred.models.predict import (

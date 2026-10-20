@@ -14,6 +14,11 @@ COMCAT = "https://earthquake.usgs.gov/fdsnws/event/1/query"
 LICENSE = "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
 
 
+def _utc_from_ms(t_ms: float) -> datetime:
+    """UTC time from Unix milliseconds. Works for dates before 1970 on Windows."""
+    return datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_ms) / 1000.0)
+
+
 def _events_chunk(start: datetime, end: datetime, minmag: float) -> list[dict[str, Any]]:
     params = {
         "format": "geojson",
@@ -28,6 +33,22 @@ def _events_chunk(start: datetime, end: datetime, minmag: float) -> list[dict[st
     return list(payload.get("features") or [])
 
 
+def _events_range(start: datetime, end: datetime, minmag: float, min_span_days: int = 7) -> list[dict[str, Any]]:
+    """Fetch a range, splitting when ComCat hits the 20k cap so events are not dropped."""
+    chunk = _events_chunk(start, end, minmag)
+    span_days = max((end - start).total_seconds() / 86400.0, 0.0)
+    if len(chunk) < 20000 or span_days <= min_span_days:
+        if len(chunk) >= 20000:
+            print(
+                f"  error: still hit 20k cap for {start.date()}-{end.date()} "
+                f"after shrinking; some events may be missing"
+            )
+        return chunk
+    mid = start + (end - start) / 2
+    print(f"  ComCat split {start.date()} -> {end.date()} at {mid.date()} (hit 20k cap)")
+    return _events_range(start, mid, minmag, min_span_days) + _events_range(mid, end, minmag, min_span_days)
+
+
 def pull_comcat(
     start: datetime,
     end: datetime,
@@ -40,16 +61,14 @@ def pull_comcat(
     while cursor < end:
         nxt = min(cursor + timedelta(days=180), end)
         print(f"  ComCat {cursor.date()} -> {nxt.date()}")
-        chunk = _events_chunk(cursor, nxt, minmag)
-        if len(chunk) >= 20000:
-            print(f"  warning: hit 20k cap for {cursor.date()}-{nxt.date()}; raise minmag or shrink chunks")
+        chunk = _events_range(cursor, nxt, minmag)
         for feat in chunk:
             props = feat.get("properties") or {}
             coords = (feat.get("geometry") or {}).get("coordinates") or [None, None, None]
             t_ms = props.get("time")
             if t_ms is None:
                 continue
-            observed = datetime.fromtimestamp(t_ms / 1000.0, tz=timezone.utc)
+            observed = _utc_from_ms(t_ms)
             mag = props.get("mag")
             if mag is None:
                 continue

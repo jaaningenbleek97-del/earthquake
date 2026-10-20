@@ -6,7 +6,7 @@ function freshAcc(row) {
 }
 
 
-const TABS = ["overview", "scoreboard", "ledger", "drivers", "earth", "aftershock", "lab"];
+const TABS = ["overview", "saved", "how", "scoreboard", "ledger", "drivers", "earth", "aftershock", "strategies", "lab"];
 const ALIASES = { map: "overview", hunt: "lab", backtest: "lab", brain: "lab", sequence: "lab", analog: "earth", anomaly: "earth", graph: "earth" };
 const LAB_ANCHORS = { hunt: "lab-hunt", sequence: "lab-hunt-sequence", backtest: "lab-backtest", brain: "lab-brain", watch: "lab-watch" };
 const FILTER_STORE = "eqpred.ledger.filters";
@@ -109,6 +109,7 @@ function freshView(card) {
       traffic: card?.traffic_sentence,
       wait: card?.wait_plain,
       neighborhood: card?.neighborhood_plain,
+      live: Boolean(card?.live),
     };
   }
 
@@ -127,6 +128,7 @@ function inferredWeekState(card) {
 
 function chanceKind(card) {
   const last = freshMode() === "lastweek";
+  if (!last && card?.live) return "latest working card · next 30 days";
   const prefix = last ? "last 7 days of sensors" : "published chance";
   const state = inferredWeekState(card);
   if (state === "beat") return `${prefix} · moved and beat a typical year`;
@@ -281,6 +283,15 @@ function chance(value) {
   return `${n} in 100`;
 }
 
+function rateTimes(row) {
+  const p = Number(row?.p);
+  const climate = Number(row?.climatology_p);
+  if (!Number.isFinite(p) || !Number.isFinite(climate) || climate < 1e-6) return "";
+  const rounded = Math.round((p / climate) * 10) / 10;
+  const label = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return `${label}× the usual rate`;
+}
+
 function placeShort(name) {
   return {
     global: "Earth-wide",
@@ -352,6 +363,10 @@ function showTab(name, source) {
     panel.classList.toggle("is-on", panel.id === name);
   });
   writeHash(name);
+  if (name === "strategies") {
+    loadTapes();
+    loadSavedStrategies();
+  }
   if (name === "overview") {
     requestAnimationFrame(() => {
       if (state.globeData) drawGlobe(state.globeData);
@@ -499,6 +514,195 @@ function renderBacktestPack(pack) {
       runBacktest();
     });
   });
+}
+
+function in100(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return `${Math.round(Number(value) * 100)} in 100`;
+}
+
+function signedGain(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  const n = Number(value);
+  return `${n >= 0 ? "+" : ""}${n.toFixed(3)}`;
+}
+
+function renderStrategy(report) {
+  const note = $("st-note");
+  const table = $("st-out");
+  if (!table) return;
+  if (!report || report.ready === false) {
+    if (note) note.textContent = report?.note || "The strategy tape is not ready.";
+    table.innerHTML = "";
+    return;
+  }
+  const choices = report.choices || {};
+  if (note) {
+    note.textContent = `${report.label || report.strategy}. Delay ${choices.lag_days ?? 0} days, alarm top ${Math.round((choices.alarm_share || 0) * 100)}%, rarity constant ${choices.rarity_n0 ?? "—"}. ${report.note || ""}`;
+  }
+  const body = (report.rows || []).map((row) => `<tr>
+    <td>${row.label} · M≥${row.magnitude_min}</td>
+    <td>${signedGain(row.develop_information_gain)}</td>
+    <td>${signedGain(row.information_gain)}</td>
+    <td>${band(row.gain_low, row.gain_high)}</td>
+    <td>${row.tests_agree ? "both agree" : "not yet"}</td>
+    <td>${in100(row.card_mean)}</td>
+    <td>${in100(row.happened)}</td>
+    <td>${in100(row.above)}</td>
+    <td>${in100(row.below)}</td>
+    <td>${row.mornings ?? "—"}</td>
+  </tr>`).join("");
+  table.innerHTML = `<thead><tr><th>Place</th><th>1990–2008</th><th>2009 onward</th><th>95% interval</th><th>Tests</th><th>Said</th><th>It happened</th><th>When above</th><th>When below</th><th>Windows</th></tr></thead><tbody>${body || `<tr><td colspan="10" class="empty">No rows.</td></tr>`}</tbody>`;
+}
+
+function band(low, high) {
+  if (low == null || high == null) return "—";
+  return `${signedGain(low)} to ${signedGain(high)}`;
+}
+
+function renderSavedStrategies(pack) {
+  const note = $("st-saved-note");
+  const table = $("st-saved");
+  if (!table) return;
+  if (note && pack?.note) note.textContent = pack.note;
+  if (!pack || pack.ready === false) {
+    table.innerHTML = `<tbody><tr><td class="empty">${pack?.note || "No saved cards yet."}</td></tr></tbody>`;
+    return;
+  }
+  const body = (pack.cards || []).map((card) => {
+    const later = card.rehearsal || {};
+    const ahead = card.since_save || {};
+    const aheadText = ahead.mornings >= 8 ? signedGain(ahead.information_gain) : `waiting · ${ahead.mornings || 0} closed`;
+    const key = card.label_version ? ` · answer key v${card.label_version}` : "";
+    const status = `${card.status}${card.refit_since_save ? " · refit since save" : ""}`;
+    return `<tr>
+      <td>${card.saved_at}</td>
+      <td>${card.place} · ${card.horizon_days}d · M≥${card.magnitude_min ?? "—"}${key}</td>
+      <td>${card.rule_label}</td>
+      <td>${card.trials_at_save ?? "—"}</td>
+      <td>${signedGain(card.develop?.information_gain)}</td>
+      <td>${signedGain(later.information_gain)} <span class="hint">${band(later.gain_low, later.gain_high)}</span></td>
+      <td>${aheadText}</td>
+      <td>${in100(later.card_mean)}</td>
+      <td>${in100(later.happened)}</td>
+      <td>${status}</td>
+      <td><button type="button" class="btn ghost st-drop" data-id="${card.id}">Remove</button></td>
+    </tr>`;
+  }).join("");
+  table.innerHTML = `<thead><tr><th>Saved</th><th>Card</th><th>Rule</th><th>Trials</th><th>1990–2008</th><th>2009 until save</th><th>Since save</th><th>Said</th><th>It happened</th><th>Status</th><th></th></tr></thead><tbody>${body || `<tr><td colspan="11" class="empty">No saved cards yet.</td></tr>`}</tbody>`;
+  table.querySelectorAll(".st-drop").forEach((btn) => {
+    btn.addEventListener("click", () => loadSavedStrategies(btn.dataset.id));
+  });
+}
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${url} ${res.status}`);
+  return res.json();
+}
+
+async function loadSavedStrategies(dropId) {
+  const table = $("st-saved");
+  if (table) table.innerHTML = `<tbody><tr><td class="empty">Scoring saved cards…</td></tr></tbody>`;
+  try {
+    const pack = dropId
+      ? await post("/api/saved-strategies", { action: "drop", id: dropId })
+      : await get("/api/saved-strategies");
+    renderSavedStrategies(pack);
+  } catch (err) {
+    renderSavedStrategies({ ready: false, note: err.message });
+  }
+}
+
+async function loadTapes() {
+  const select = $("st-tape");
+  if (!select || select.dataset.loaded) return;
+  try {
+    const pack = await get("/api/tapes");
+    const built = new Map((pack.tapes || []).map((tape) => [tape.name, tape]));
+    select.innerHTML = Object.entries(pack.for_label || {})
+      .map(([version, name]) => {
+        const tape = built.get(name);
+        const reach = tape?.end ? ` · data to ${tape.end}` : "";
+        const state = tape || name === pack.default ? reach : " · not built yet";
+        return `<option value="${name}"${tape || name === pack.default ? "" : " disabled"}>Version ${version}${state}</option>`;
+      })
+      .join("");
+    select.value = pack.default;
+    select.dataset.loaded = "1";
+  } catch (err) {
+    select.innerHTML = `<option value="">Version 1</option>`;
+  }
+}
+
+async function saveStrategy() {
+  const body = {
+    horizon: Number($("st-horizon").value),
+    region: $("st-region").value,
+    strategy: $("st-strategy").value,
+    alarm_share: Number($("st-alarm").value),
+    rarity_n0: Number($("st-rarity").value),
+    lag_days: Number($("st-lag").value),
+    bins: Number($("st-bins").value),
+    agree_min: Number($("st-agree").value),
+    use_readings: $("st-readings").checked,
+  };
+  if ($("st-tape")?.value) body.tape = $("st-tape").value;
+  if (!$("st-shrink-auto").checked) body.shrink = Number($("st-shrink").value);
+  if (!$("st-odds-auto").checked) body.odds = Number($("st-odds").value);
+  if (!$("st-k-auto").checked) body.matched_k = Number($("st-k").value);
+  const table = $("st-saved");
+  if (table) table.innerHTML = `<tbody><tr><td class="empty">Saving…</td></tr></tbody>`;
+  try {
+    renderSavedStrategies(await post("/api/saved-strategies", body));
+  } catch (err) {
+    renderSavedStrategies({ ready: false, note: err.message });
+  }
+}
+
+const STRATEGY_PRESETS = {
+  alarm_14_15: { lag: 14, alarm: 0.15 },
+  alarm_14_30: { lag: 14, alarm: 0.3 },
+  alarm_14_40: { lag: 14, alarm: 0.4 },
+  alarm_14_50: { lag: 14, alarm: 0.5 },
+  rarity_3_200: { lag: 3, rarity: 200 },
+};
+
+function applyStrategyPreset() {
+  const preset = STRATEGY_PRESETS[$("st-strategy").value];
+  if (!preset) return;
+  if (preset.lag != null) $("st-lag").value = String(preset.lag);
+  if (preset.alarm != null) $("st-alarm").value = String(preset.alarm);
+  if (preset.rarity != null) $("st-rarity").value = String(preset.rarity);
+}
+
+async function runStrategy() {
+  const table = $("st-out");
+  if (table) table.innerHTML = `<tbody><tr><td class="empty">Replaying…</td></tr></tbody>`;
+  const q = new URLSearchParams({
+    horizon: $("st-horizon").value,
+    region: $("st-region").value,
+    strategy: $("st-strategy").value,
+    alarm_share: $("st-alarm").value,
+    rarity_n0: $("st-rarity").value,
+    lag_days: $("st-lag").value,
+    bins: $("st-bins").value,
+    agree_min: $("st-agree").value,
+    use_readings: $("st-readings").checked ? "1" : "0",
+  });
+  if ($("st-tape")?.value) q.set("tape", $("st-tape").value);
+  if (!$("st-shrink-auto").checked) q.set("shrink", $("st-shrink").value);
+  if (!$("st-odds-auto").checked) q.set("odds", $("st-odds").value);
+  if (!$("st-k-auto").checked) q.set("matched_k", $("st-k").value);
+  try {
+    renderStrategy(await get(`/api/strategy?${q}`));
+  } catch (err) {
+    renderStrategy({ ready: false, note: err.message });
+  }
 }
 
 function renderTrade(trade) {
@@ -662,7 +866,7 @@ async function retrainBrain() {
   const note = $("brain-note");
   if (note) note.textContent = "Learning on finished weeks…";
   try {
-    const pack = await get("/api/learn?train=1");
+    const pack = await post("/api/learn", { train: true });
     window.__promote = pack.promote;
     window.__transfer = pack.transfer;
     renderBrain(pack.brain || pack);
@@ -932,38 +1136,96 @@ function callCardHtml(card, { boxId, title, place, extra } = {}) {
   </article>`;
 }
 
-function mainshockFocusHtml(data) {
-  const snap = state.snap?.mainshock || {};
-  const score = data.frozen_score || snap.frozen_score || {};
-  const short = data.short_horizons || snap.short_horizons || [];
-  const three = short.filter((row) => Number(row.horizon_days) === 3);
-  const cards = three.map((w) => `<article class="call-card${w.region === "global" ? " global" : ""}">
-      <p class="where">Next 3 days · ${w.label} M≥${w.magnitude_min}</p>
-      <div class="chance">${w.chance_plain || "—"}<small>every reading can move this</small></div>
-      <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
-      ${w.group_plain ? `<p class="etas">${w.group_plain}</p>` : ""}
-      ${w.agreement_plain ? `<p class="etas">${w.agreement_plain}</p>` : ""}
-      ${voteBits(w)}
+function researchCardsHtml(data) {
+  const pack = data.research_cards || {};
+  const where = pack.where || [];
+  const place = pack.alpine_location || {};
+  const eepas = pack.eepas || [];
+  const slip = pack.slow_slip || {};
+  if (!where.length && !place.patch && !eepas.length && !slip.on_plain) return "";
+  const thirds = where.map((row) => `<article class="call-card">
+      <p class="where">Next 30 days · ${row.title} M≥${row.magnitude_min}</p>
+      <div class="chance">${row.chance_plain || "—"}<small>research · which third</small></div>
+      <p class="etas">Usual for this third: ${row.usual_plain || "—"}</p>
     </article>`).join("");
-  const exam = data.agreement_exam || snap.agreement_exam;
-  const threeBlock = cards
-    ? `<article class="card head-card fresh-week"><h3>Next 3 days</h3><p class="hint">Every reading keeps its own value from the early years. Copies of the same measurement are added together and stop at 3 points for a solar-watch measurement and 1 point for any other. This does not change the 30-day card.</p>${exam?.plain ? `<p class="hint">${exam.plain}</p>` : ""}<div class="grid heads fresh-attempt-grid">${cards}</div></article>`
-    : "";
-  const draft = data.draft || snap.draft;
-  const voteDraft = data.vote_draft || snap.vote_draft;
-  const thirty = (draft?.week || []).map((w) => `${w.label} ${w.chance_plain || "—"} (typical ${w.climatology_chance_plain || "—"})`).join(" · ");
-  const threeDraft = (voteDraft?.week || []).map((w) => `${w.label} ${w.chance_plain || "—"} (typical ${w.climatology_chance_plain || "—"})`).join(" · ");
-  const working = (thirty || threeDraft) ? `<article class="call-card">
-      <p class="where">Working model · not the scored card</p>
-      <div class="chance">Draft<small>can still change</small></div>
-      <p class="sentence">This is the model we can keep changing. It does not replace the frozen 30-day or 3-day cards.</p>
-      ${thirty ? `<p class="etas">30 days: ${thirty}</p><p class="etas">${draft?.promote?.reason || draft?.note || ""}</p>` : ""}
-      ${threeDraft ? `<p class="etas">3 days: ${threeDraft}</p><p class="etas">${voteDraft?.note || ""}</p>` : ""}
+  const located = place.later_share == null ? "—" : `${Math.round(place.later_share * 100)} in 100`;
+  const alpine = place.patch ? `<article class="call-card">
+      <p class="where">Alpine Fault · which third</p>
+      <div class="chance">${place.patch}<small>location only · not a 30-day chance</small></div>
+      <p class="sentence">${place.sentence || ""}</p>
+      <p class="etas">Later shocks in the named third: ${located}. Equal thirds: 33 in 100.</p>
     </article>` : "";
-  const scoreLine = [score["30"]?.plain, score["3"]?.plain].filter(Boolean).join(" ");
-  const odd = oddBoxHtml(data.odd_box || snap.odd_box);
-  const story = storyHtml(data.story || snap.story);
-  return `${odd}${story}${scoreLine ? `<p class="hint">${scoreLine}</p>` : ""}${threeBlock}${working}`;
+  const medium = eepas.map((row) => `<article class="call-card">
+      <p class="where">Next 90 days · ${row.title}</p>
+      <div class="chance">${row.chance_plain || "—"}<small>research · catalog</small></div>
+      <p class="sentence">${row.sentence || ""}</p>
+    </article>`).join("");
+  const sse = slip.on_plain ? `<article class="call-card">
+      <p class="where">${slip.title || "Hikurangi slow slip"}</p>
+      <div class="chance">${slip.slip_on_today ? slip.on_plain : slip.off_plain}<small>${slip.slip_on_today ? "slow slip is on" : "slow slip is off"}</small></div>
+      <p class="sentence">${slip.sentence || ""}</p>
+      <p class="etas">While on: ${slip.on_plain}. While off: ${slip.off_plain}.</p>
+    </article>` : "";
+  return `<article class="card head-card fresh-week"><h3>Research cards</h3><p class="hint">These sit beside the frozen 30-day cards. They do not replace them.</p><div class="grid heads fresh-attempt-grid">${thirds}${alpine}${medium}${sse}</div></article>`;
+}
+
+function shortCardBlock(data, horizon) {
+  const snap = state.snap?.mainshock || {};
+  const short = data.short_horizons || snap.short_horizons || [];
+  const rows = short.filter((row) => Number(row.horizon_days) === horizon);
+  if (!rows.length) return "";
+  const cards = rows.map((w) => `<article class="call-card${w.region === "global" ? " global" : ""}">
+      <p class="where">Next ${horizon} days · ${w.label} M≥${w.magnitude_min}</p>
+      <div class="chance">${w.chance_plain || "—"}<small>${rateTimes(w) || (horizon === 3 ? "every reading can move this" : "beside the 30-day card")}</small></div>
+      <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
+      ${horizon === 3 && w.base_chance_plain ? `<p class="etas">Shared model: ${w.base_chance_plain}. Readings then add on top.</p>` : ""}
+      ${horizon === 3 && w.group_plain ? `<p class="etas">${w.group_plain}</p>` : ""}
+      ${horizon === 3 && w.agreement_plain ? `<p class="etas">${w.agreement_plain}</p>` : ""}
+      ${horizon === 3 ? voteBits(w) : `<p class="etas">${w.beats_climatology ? "Beat the five-year rate on later mornings." : "Has not beaten the five-year rate on later mornings."}</p>`}
+    </article>`).join("");
+  const hint = horizon === 3
+    ? "Same model as the 7-day and 30-day cards, for this shorter window. Readings then add on top. Copies of one measurement share one ceiling, and those extra points stay between half and two and a half times the usual rate. Hikurangi and the Alpine Fault count magnitude 4.5 or larger. Kermadec counts magnitude 5 or larger. Earth-wide stays at magnitude 7."
+    : "Same readings as the 30-day card, asking about the next 7 days.";
+  const exam = horizon === 3 ? (data.agreement_exam || snap.agreement_exam) : null;
+  return `<article class="card head-card fresh-week"><h3>Next ${horizon} days</h3><p class="hint">${hint}</p>${exam?.plain ? `<p class="hint">${exam.plain}</p>` : ""}<div class="grid heads fresh-attempt-grid">${cards}</div></article>`;
+}
+
+function mainshockFocusHtml(data) {
+  return `${shortCardBlock(data, 7)}${shortCardBlock(data, 3)}${researchCardsHtml(data)}`;
+}
+
+function renderSavedCalls(pack) {
+  const meta = $("saved-meta");
+  const out = $("saved-out");
+  if (!out) return;
+  const rows = pack?.rows || [];
+  if (meta) meta.textContent = pack?.plain || "No saved calls yet.";
+  if (!rows.length) {
+    out.innerHTML = `<p class="empty">No saved calls yet.</p>`;
+    return;
+  }
+  const days = [];
+  for (const row of rows) {
+    if (!days.length || days[days.length - 1].day !== row.issue_day) {
+      days.push({ day: row.issue_day, rows: [row] });
+    } else {
+      days[days.length - 1].rows.push(row);
+    }
+  }
+  out.innerHTML = days.map((group) => {
+    const body = group.rows.map((row) => `<tr>
+      <td>${row.model}</td>
+      <td>${row.label}</td>
+      <td>${row.horizon_days} days · M≥${row.magnitude_min}</td>
+      <td>${row.chance_plain || "—"}</td>
+      <td>${row.climatology_chance_plain || "—"}</td>
+      <td><span class="pill ${row.status === "waiting" ? "open" : row.status}">${row.status_plain}</span></td>
+    </tr>`).join("");
+    return `<article class="card"><h3>${group.day}</h3><div class="table-wrap"><table>
+      <thead><tr><th>Card</th><th>Place</th><th>Window</th><th>Chance</th><th>Usual rate</th><th>Result</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div></article>`;
+  }).join("");
 }
 
 function storyHtml(story) {
@@ -1453,7 +1715,7 @@ function voteBits(w) {
   const swarm = w.swarm
     ? `<p class="etas">${w.swarm_plain}</p>`
     : "";
-  return `<p class="etas">${w.lineup_plain || ""}</p>${up ? `<p class="why">Up: ${up}.</p>` : ""}${down ? `<p class="why">Down: ${down}.</p>` : ""}${swarm}<p class="etas">${w.issued_from === "open" ? "Every reading keeps its own value from the early years. Copies of the same measurement are added together and stop at 3 points for a solar-watch measurement and 1 point for any other." : "Weights are frozen for scoring. The working model can still change and does not replace this card."}</p>`;
+  return `<p class="etas">${w.lineup_plain || ""}</p>${up ? `<p class="why">Up: ${up}.</p>` : ""}${down ? `<p class="why">Down: ${down}.</p>` : ""}${swarm}<p class="etas">${w.issued_from === "open" ? "The shared model comes first. Readings then add on top. Copies of one measurement share one ceiling, and those extra points stay between half and two and a half times the usual rate." : "Weights are frozen for scoring. The working model can still change and does not replace this card."}</p>`;
 }
 
 function shortHorizonCardsHtml(pack) {
@@ -1464,12 +1726,13 @@ function shortHorizonCardsHtml(pack) {
     if (!week.length) return "";
     const cards = week.map((w) => `<article class="call-card${w.region === "global" ? " global" : ""}">
       <p class="where">Next ${horizon} days · ${w.label} M≥${w.magnitude_min}</p>
-      <div class="chance">${w.chance_plain || "—"}<small>${horizon === 3 && (w.issued_from === "votes" || w.issued_from === "open") ? (w.issued_from === "open" ? "every reading can move this" : "votes added up") : "beside the 30-day card"}</small></div>
+      <div class="chance">${w.chance_plain || "—"}<small>${horizon === 3 ? (rateTimes(w) || "every reading can move this") : "beside the 30-day card"}</small></div>
       <p class="etas">Typical year: ${w.climatology_chance_plain || "—"}</p>
+      ${horizon === 3 && w.base_chance_plain ? `<p class="etas">Shared model: ${w.base_chance_plain}. Readings then add on top.</p>` : ""}
       ${horizon === 3 && w.group_plain ? `<p class="etas">${w.group_plain}</p>` : ""}
       ${horizon === 3 && (w.issued_from === "votes" || w.issued_from === "open") ? voteBits(w) : `<p class="etas">${w.beats_climatology ? "Beat the five-year rate on later mornings." : "Has not beaten the five-year rate on later mornings."}</p>`}
     </article>`).join("");
-    return `<article class="card head-card fresh-week"><h3>Next ${horizon} days</h3><p class="hint">${horizon === 3 ? "Every reading keeps its own value from the early years. Copies of the same measurement are added together and stop at 3 points for a solar-watch measurement and 1 point for any other. This does not change the 30-day card." : "Same recipe as the published card, asking about a shorter window. This does not replace the 30-day chance."}</p><div class="grid heads fresh-attempt-grid">${cards}</div></article>`;
+    return `<article class="card head-card fresh-week"><h3>Next ${horizon} days</h3><p class="hint">${horizon === 3 ? "Same model as the 7-day and 30-day cards, for this shorter window. Readings then add on top. Those extra points stay between half and two and a half times the usual rate. This does not change the 30-day card." : "Same recipe as the published card, asking about a shorter window. This does not replace the 30-day chance."}</p><div class="grid heads fresh-attempt-grid">${cards}</div></article>`;
   }).join("");
   return blocks;
 }
@@ -2268,6 +2531,9 @@ function wireUi() {
   });
   $("ser-go")?.addEventListener("click", loadSeries);
   $("bt-go")?.addEventListener("click", runBacktest);
+  $("st-strategy")?.addEventListener("change", applyStrategyPreset);
+  $("st-go")?.addEventListener("click", runStrategy);
+  $("st-save")?.addEventListener("click", saveStrategy);
   $("brain-go")?.addEventListener("click", retrainBrain);
   $("globe-nz")?.addEventListener("click", lookAtNZ);
   $("globe-earth")?.addEventListener("click", lookAtEarth);
@@ -2322,6 +2588,7 @@ async function boot() {
     await loadSequenceHunt(state.snap);
     await Promise.all([bench, mind, globe]);
     renderOverview(state.snap);
+    renderSavedCalls(state.snap.saved_calls);
     renderScoreboard(state.snap);
     renderEarth(state.snap.earth_state);
     applyLedgerFilters({ ...storedFilters(), ...incoming.filters });

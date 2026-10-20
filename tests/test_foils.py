@@ -61,6 +61,26 @@ def test_copy_columns_drop_and_a_different_signal_stays():
     assert float(chance[0]) < 0.05
 
 
+def test_a_check_morning_does_not_see_its_own_window():
+    from eqpred.eval.mainshock import _score_to_rate
+
+    days = pd.date_range("2017-01-01", periods=400, freq="D", tz="UTC")
+    score = np.linspace(0.0, 0.5, 400)
+    score[100:130] = 1.0
+    hits = np.zeros(400)
+    hits[100:130] = 1.0
+    every = np.ones(400, dtype=bool)
+    seen = _score_to_rate(score, hits, every, max_percentile=100)
+    blind = _score_to_rate(score, hits, every, max_percentile=100, days=days, horizon=30)
+    assert seen[115] > 0.3
+    assert blind[115] < 0.01
+    early = np.zeros(400, dtype=bool)
+    early[:250] = True
+    plain = _score_to_rate(score, hits, early, max_percentile=100)
+    windowed = _score_to_rate(score, hits, early, max_percentile=100, days=days, horizon=30)
+    assert np.allclose(plain[250:], windowed[250:])
+
+
 def test_missing_months_do_not_inflate_a_high_reading():
     from eqpred.eval.mainshock import _ObservedScaler
 

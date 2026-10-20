@@ -20,6 +20,7 @@ import pandas as pd
 from eqpred.eval.skill import MIN_N, information_gain
 from eqpred.paths import data_dir
 from eqpred.records import iso
+from eqpred.safe_io import write_json
 
 MIN_FAMILY_IG = 0.01
 
@@ -78,19 +79,23 @@ def read_frozen(root: Path | None = None) -> dict[str, Any] | None:
 
 
 def hold_published_card(report: dict[str, Any], root: Path | None = None) -> dict[str, Any]:
-    """A later refit updates the draft. The frozen card stays the published one."""
+    """A later refit may change the working model. A call already saved for a morning stays."""
+    from eqpred.eval.vote_freeze import save_model_calls
+
     frozen = read_frozen(root)
+    incoming = [dict(row) for row in report.get("week") or []]
+    if frozen:
+        # The new fit is the working model. The published week stays the locked exam.
+        report["draft"] = {
+            "writes_issued_p": False,
+            "note": "Working model. It can be refit. Each call it already made stays saved and is not rewritten.",
+            "week": incoming,
+            "promote": frozen.get("promote") or {"ready": False, "reason": "The frozen card is still the exam."},
+        }
+        report["week"] = [dict(row) for row in frozen.get("week") or []]
+    save_model_calls(report, root)
     if not frozen:
         return report
-    incoming = [dict(row) for row in report.get("week") or []]
-    report["draft"] = {
-        "writes_issued_p": False,
-        "locked_at": frozen.get("draft_locked_at") or frozen.get("locked_at"),
-        "note": "Working draft. Every family can move this number. It does not replace the frozen card.",
-        "week": incoming,
-        "promote": frozen.get("promote") or {"ready": False, "reason": "The frozen card is still the exam."},
-    }
-    report["week"] = [dict(row) for row in frozen.get("week") or []]
     report["frozen"] = {
         "locked_at": frozen.get("locked_at"),
         "family_ig_min": frozen.get("family_ig_min"),
@@ -196,7 +201,7 @@ def _fit_box(
         return None
     ref = val_mask if int(val_mask.sum()) >= 80 else fit_mask
     climate = recent_climate(y, days, train_mask)
-    similar = _score_to_rate(score, y, ref, max_percentile=100)
+    similar = _score_to_rate(score, y, ref, max_percentile=100, days=days, horizon=horizon)
     issued = _lift_onto_rate(similar, y, ref, roll, climate)
     return {
         "p": np.clip(np.asarray(issued, dtype=float), 1e-6, 1.0 - 1e-6),
@@ -389,7 +394,7 @@ def install_frozen_and_draft(
     dest = frozen_dir(root)
     for region_id, bundle in models.items():
         joblib.dump(bundle, dest / f"{region_id}.joblib")
-    frozen_path(root).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_json(frozen_path(root), payload)
     return {
         "frozen": payload,
         "draft_week": draft_week,
@@ -441,7 +446,7 @@ def apply_to_mainshock(
     report["draft"] = {
         "writes_issued_p": False,
         "locked_at": frozen.get("draft_locked_at"),
-        "note": "Working draft. Every family can move this number. It does not replace the frozen card.",
+        "note": "Working model. It can be refit. Each call it already made stays saved and is not rewritten.",
         "week": draft_week or [],
         "check_ig": frozen.get("draft_check_ig") or {},
         "families": frozen.get("draft_families") or [],
@@ -454,4 +459,4 @@ def apply_to_mainshock(
         "promote": promote or frozen.get("promote"),
     }
     report["n_beats_climatology"] = sum(1 for region in report.get("regions") or [] if region.get("beats_climatology"))
-    source.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    write_json(source, report, default=str)

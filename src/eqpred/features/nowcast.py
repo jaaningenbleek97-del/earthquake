@@ -101,7 +101,7 @@ def _nowcast_asof(
     empty: pd.DataFrame,
 ) -> pd.DataFrame:
     """Energy and b use the mag on the wire that morning."""
-    from eqpred.catalog import apply_available_at, completeness_mag_series
+    from eqpred.catalog import apply_available_at
 
     vids = set(versions["event_id"].dropna().astype(str))
     eids = quakes["event_id"].astype(str)
