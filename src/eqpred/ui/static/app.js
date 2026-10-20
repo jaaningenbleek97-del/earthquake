@@ -1220,9 +1220,10 @@ function renderSavedCalls(pack) {
       <td>${row.chance_plain || "—"}</td>
       <td>${row.climatology_chance_plain || "—"}</td>
       <td><span class="pill ${row.status === "waiting" ? "open" : row.status}">${row.status_plain}</span></td>
+      <td>${row.forecast === false ? `<span class="pill">not a forecast</span> <span class="hint">${row.written_plain || ""}</span>` : `yes <span class="hint">${row.written_plain || ""}</span>`}</td>
     </tr>`).join("");
     return `<article class="card"><h3>${group.day}</h3><div class="table-wrap"><table>
-      <thead><tr><th>Card</th><th>Place</th><th>Window</th><th>Chance</th><th>Usual rate</th><th>Result</th></tr></thead>
+      <thead><tr><th>Card</th><th>Place</th><th>Window</th><th>Chance</th><th>Usual rate</th><th>Result</th><th>Forecast?</th></tr></thead>
       <tbody>${body}</tbody>
     </table></div></article>`;
   }).join("");

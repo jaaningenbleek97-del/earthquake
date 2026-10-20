@@ -707,7 +707,7 @@ def saved_call_rows(quakes: pd.DataFrame | None = None, root: Path | None = None
         days = pd.DatetimeIndex(
             [pd.Timestamp(str(prepared[idx]["issue_day"])[:10], tz="UTC") for idx in idxs]
         )
-        hits = fresh_hits(quakes, REGIONS[region], mag, days, horizon)
+        hits = fresh_hits(quakes, REGIONS[region], mag, days, horizon, label_version=1)
         for idx, hit in zip(idxs, hits, strict=True):
             issue = pd.Timestamp(str(prepared[idx]["issue_day"])[:10], tz="UTC")
             if catalog_end < issue + pd.Timedelta(days=horizon):
@@ -724,6 +724,8 @@ def saved_call_rows(quakes: pd.DataFrame | None = None, root: Path | None = None
             status, status_plain = "hit", "first shock"
         else:
             status, status_plain = "miss", "no first shock"
+        forecast = counts_as_prospective(entry)
+        written_day, written_plain = _written_note(entry, forecast)
         model_id = str(entry.get("model_id") or "")
         rows.append(
             {
@@ -740,6 +742,9 @@ def saved_call_rows(quakes: pd.DataFrame | None = None, root: Path | None = None
                 "climatology_chance_plain": entry.get("climatology_chance_plain"),
                 "status": status,
                 "status_plain": status_plain,
+                "forecast": forecast,
+                "written_day": written_day,
+                "written_plain": written_plain,
             }
         )
     rows.sort(
@@ -753,6 +758,7 @@ def saved_call_rows(quakes: pd.DataFrame | None = None, root: Path | None = None
     n_hits = sum(1 for row in rows if row["status"] == "hit")
     n_closed = sum(1 for row in rows if row["status"] != "waiting")
     n_waiting = len(rows) - n_closed
+    n_late = sum(1 for row in rows if not row["forecast"])
     if not rows:
         plain = "No saved calls yet."
     elif n_closed == 0:
@@ -763,11 +769,30 @@ def saved_call_rows(quakes: pd.DataFrame | None = None, root: Path | None = None
             f"{len(rows)} saved calls. {shocks} in {n_closed} closed windows. "
             f"{n_waiting} still waiting."
         )
+    if n_late:
+        plain += f" {n_late} were written after their window opened. They are kept, but they are not forecasts."
     return {
         "rows": rows,
         "n": len(rows),
         "n_waiting": n_waiting,
         "n_closed": n_closed,
         "n_hits": n_hits,
+        "n_not_forecasts": n_late,
         "plain": plain,
     }
+
+
+def _written_note(entry: dict[str, Any], forecast: bool) -> tuple[str | None, str]:
+    """When the card was written, in words. A late card is kept but is not a forecast."""
+    written = entry.get("written_at")
+    if not written:
+        return None, "no write time on file, so not a forecast"
+    stamp = pd.Timestamp(written)
+    stamp = stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+    issue = pd.Timestamp(str(entry.get("issue_day") or "")[:10], tz="UTC")
+    late = int((stamp.normalize() - issue).days)
+    day = stamp.date().isoformat()
+    if forecast:
+        return day, "written that morning" if late <= 0 else "written the next day"
+    unit = "day" if late == 1 else "days"
+    return day, f"written {late} {unit} after its window opened"

@@ -138,6 +138,33 @@ def test_ledger_keeps_the_first_writing_of_a_morning(tmp_path):
     assert three[0]["prospective"] is False
 
 
+def test_a_late_card_stays_saved_but_is_marked_not_a_forecast(tmp_path):
+    from eqpred.eval.vote_freeze import saved_call_rows
+
+    on_time = dict(_row(0.2), horizon_days=30, issue_day="2026-09-21", model_id="published")
+    late = dict(on_time, model_id="working.30d")
+    append_entries([on_time], root=tmp_path, written_at=datetime(2026, 9, 21, 6, tzinfo=timezone.utc))
+    append_entries([late], root=tmp_path, written_at=datetime(2026, 10, 13, tzinfo=timezone.utc))
+    quakes = pd.DataFrame(
+        {
+            "observed_at": [pd.Timestamp("2026-10-19", tz="UTC")],
+            "magnitude": [4.0],
+            "latitude": [0.0],
+            "longitude": [0.0],
+            "lat": [0.0],
+            "lon": [0.0],
+        }
+    )
+    pack = saved_call_rows(quakes, tmp_path)
+    by_model = {row["model_id"]: row for row in pack["rows"]}
+    assert len(pack["rows"]) == 2
+    assert by_model["published"]["forecast"] is True
+    assert by_model["working.30d"]["forecast"] is False
+    assert "22 days" in by_model["working.30d"]["written_plain"]
+    assert pack["n_not_forecasts"] == 1
+    assert "not forecasts" in pack["plain"]
+
+
 def test_live_score_ignores_a_card_written_after_its_window(tmp_path):
     append_entries(
         [
