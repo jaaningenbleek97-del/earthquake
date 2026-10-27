@@ -9,6 +9,7 @@ Issued cards use this model's p. Climatology sits beside it as a foil.
 """
 
 import hashlib
+import gc
 import json
 import math
 import warnings
@@ -1707,6 +1708,7 @@ def _promoted_leftover_score(
             hold_mask=val_mask,
             leftover_cols=cols,
         )
+        gc.collect()
         leftover_p = packed.get("leftover_p")
         leftover_hat = packed.get("leftover_hat")
         regime = packed.get("regime")

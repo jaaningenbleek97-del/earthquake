@@ -366,6 +366,10 @@ function showTab(name, source) {
   if (name === "strategies") {
     loadTapes();
     loadSavedStrategies();
+    loadCatalogCard();
+    loadAttempts();
+    loadSeparate();
+    loadIdeas();
   }
   if (name === "overview") {
     requestAnimationFrame(() => {
@@ -548,11 +552,19 @@ function renderStrategy(report) {
     <td>${row.tests_agree ? "both agree" : "not yet"}</td>
     <td>${in100(row.card_mean)}</td>
     <td>${in100(row.happened)}</td>
-    <td>${in100(row.above)}</td>
-    <td>${in100(row.below)}</td>
+    <td>${ofCount(row.above, row.n_above)}</td>
+    <td>${ofCount(row.below, row.n_below)}</td>
     <td>${row.mornings ?? "—"}</td>
   </tr>`).join("");
-  table.innerHTML = `<thead><tr><th>Place</th><th>1990–2008</th><th>2009 onward</th><th>95% interval</th><th>Tests</th><th>Said</th><th>It happened</th><th>When above</th><th>When below</th><th>Windows</th></tr></thead><tbody>${body || `<tr><td colspan="10" class="empty">No rows.</td></tr>`}</tbody>`;
+  table.innerHTML = `<thead><tr><th>Place</th><th>1990–2008</th><th>2009 onward</th><th>95% interval</th><th>Tests</th><th>Said</th><th>It happened</th><th>Marked up</th><th>Marked down</th><th>Windows</th></tr></thead><tbody>${body || `<tr><td colspan="10" class="empty">No rows.</td></tr>`}</tbody>`;
+}
+
+function ofCount(rate, n) {
+  if (n == null) return "—";
+  const count = Number(n);
+  if (!count) return "0";
+  if (count < 8 || rate == null) return `${count} windows`;
+  return `${Math.round(Number(rate) * count)} of ${count}`;
 }
 
 function band(low, high) {
@@ -574,7 +586,8 @@ function renderSavedStrategies(pack) {
     const ahead = card.since_save || {};
     const aheadText = ahead.mornings >= 8 ? signedGain(ahead.information_gain) : `waiting · ${ahead.mornings || 0} closed`;
     const key = card.label_version ? ` · answer key v${card.label_version}` : "";
-    const status = `${card.status}${card.refit_since_save ? " · refit since save" : ""}`;
+    const shuffle = later.shuffle ? ` · shuffle ${later.shuffle.beats}/${later.shuffle.draws}` : "";
+    const status = `${card.status}${card.refit_since_save ? " · refit since save" : ""}${shuffle}`;
     return `<tr>
       <td>${card.saved_at}</td>
       <td>${card.place} · ${card.horizon_days}d · M≥${card.magnitude_min ?? "—"}${key}</td>
@@ -615,6 +628,141 @@ async function loadSavedStrategies(dropId) {
     renderSavedStrategies(pack);
   } catch (err) {
     renderSavedStrategies({ ready: false, note: err.message });
+  }
+}
+
+async function loadCatalogCard() {
+  const table = $("cat-out");
+  const note = $("cat-note");
+  if (!table) return;
+  try {
+    const pack = await get("/api/catalog-card");
+    if (!pack || pack.ready === false) {
+      if (note) note.textContent = pack?.note || "Run eqpred catalog-card to score this benchmark.";
+      table.innerHTML = "";
+      return;
+    }
+    if (note && pack.note) note.textContent = pack.note;
+    const rows = (pack.rows || []).filter((row) => row.horizon_days === 30);
+    const body = rows.map((row) => `<tr>
+      <td>${row.label} · M≥${row.target}</td>
+      <td>${signedGain(row.information_gain)}</td>
+      <td>${band(row.gain_low, row.gain_high)}</td>
+      <td>${in100(row.said)}</td>
+      <td>${in100(row.happened)}</td>
+      <td>${row.slowslip_factor === 1 ? "—" : row.slowslip_factor}</td>
+      <td>${row.mornings ?? "—"}</td>
+    </tr>`).join("");
+    table.innerHTML = `<thead><tr><th>Place</th><th>2009 onward</th><th>95% interval</th><th>Said</th><th>It happened</th><th>Slow slip</th><th>Windows</th></tr></thead><tbody>${body}</tbody>`;
+  } catch (err) {
+    if (note) note.textContent = err.message;
+  }
+}
+
+async function loadAttempts() {
+  const table = $("st-attempts");
+  const note = $("st-attempts-note");
+  if (!table) return;
+  try {
+    const pack = await get("/api/attempts");
+    if (note) note.textContent = pack.note || "Every replay is kept here as dated chances.";
+    const body = (pack.recent || []).map((row) => `<tr>
+      <td>${(row.tried_at || "").slice(0, 16).replace("T", " ")}</td>
+      <td>${row.label || row.name}</td>
+      <td>${row.source}</td>
+      <td>${(row.horizons || []).join(", ")}</td>
+      <td>${row.n_forecasts ?? "—"}</td>
+      <td>${row.answer_key || "—"}</td>
+    </tr>`).join("");
+    table.innerHTML = `<thead><tr><th>When</th><th>Attempt</th><th>From</th><th>Days ahead</th><th>Forecasts</th><th>Answer key</th></tr></thead><tbody>${body || `<tr><td colspan="6" class="empty">No attempts saved yet.</td></tr>`}</tbody>`;
+  } catch (err) {
+    if (note) note.textContent = err.message;
+  }
+}
+
+function gain4(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  const n = Number(value);
+  return `${n >= 0 ? "+" : ""}${n.toFixed(4)}`;
+}
+
+async function loadIdeas() {
+  const table = $("idea-out");
+  const note = $("idea-note");
+  if (!table) return;
+  try {
+    const pack = await get("/api/idea-bench");
+    if (!pack || pack.ready === false) {
+      if (note) note.textContent = pack?.note || "Run eqpred idea-bench to score the ten ideas.";
+      table.innerHTML = "";
+      return;
+    }
+    if (note && pack.note) note.textContent = pack.note;
+    const body = (pack.ideas || []).map((row) => `<tr>
+      <td>${row.label}<div class="hint">${row.source}</div></td>
+      <td>${row.v1_pointed_right ?? 0} of ${row.v1_cards ?? 0}</td>
+      <td>${row.v2_pointed_right ?? 0} of ${row.v2_cards ?? 0}</td>
+      <td>${(row.v1_passed ?? 0) + (row.v2_passed ?? 0)}</td>
+      <td>${gain4(row.v1_mean_later_gain)}</td>
+      <td>${gain4(row.v2_mean_later_gain)}</td>
+    </tr>`).join("");
+    table.innerHTML = `<thead><tr><th>Idea</th><th>Right way after 2009, version 1</th><th>Right way, version 2</th><th>Cleared 0.01</th><th>Mean gain, version 1</th><th>Mean gain, version 2</th></tr></thead><tbody>${body}</tbody>`;
+  } catch (err) {
+    if (note) note.textContent = err.message;
+  }
+}
+
+let separatePack = null;
+
+function renderSeparate() {
+  const table = $("sep-out");
+  const note = $("sep-note");
+  if (!table) return;
+  if (!separatePack || separatePack.ready === false) {
+    if (note) note.textContent = separatePack?.note || "The separate scores have not been built yet.";
+    table.innerHTML = "";
+    return;
+  }
+  const key = $("sep-key")?.value || "fresh.v1";
+  const horizon = $("sep-horizon")?.value || "30";
+  const place = $("sep-place")?.value || "all";
+  const showTies = $("sep-ties")?.checked;
+  const cards = (separatePack.cards || []).filter((card) => {
+    if (card.answer_key !== key) return false;
+    if (horizon !== "all" && String(card.horizon_days) !== horizon) return false;
+    if (place !== "all" && card.place !== place) return false;
+    if (!showTies && (card.verdict === "tie" || card.verdict === "thin")) return false;
+    return true;
+  });
+  const shownUp = cards.filter((card) => card.verdict === "up").length;
+  if (note) {
+    note.textContent = `${separatePack.note} This view: ${cards.length} cards, ${shownUp} where the marked-up windows happened more often.`;
+  }
+  const body = cards.map((card) => {
+    const gap = card.gap == null ? "—" : `${card.gap > 0 ? "+" : ""}${Math.round(card.gap * 100)} in 100`;
+    const mark = card.strategy === "current" ? " · current card" : "";
+    return `<tr>
+      <td>${card.rule}${mark}</td>
+      <td>${card.place_label}</td>
+      <td>${card.horizon_days} days</td>
+      <td>${card.windows}</td>
+      <td>${card.n_up >= 8 ? `${card.up_hits} of ${card.n_up}` : `${card.n_up} windows`}</td>
+      <td>${card.n_down >= 8 ? `${card.down_hits} of ${card.n_down}` : `${card.n_down} windows`}</td>
+      <td>${card.verdict === "tie" ? "ties the usual rate" : gap}</td>
+    </tr>`;
+  }).join("");
+  table.innerHTML = `<thead><tr><th>Rule</th><th>Place</th><th>Window</th><th>Windows</th><th>Marked up</th><th>Marked down</th><th>Gap</th></tr></thead><tbody>${body || `<tr><td colspan="7" class="empty">No card left the usual rate in this view.</td></tr>`}</tbody>`;
+}
+
+async function loadSeparate() {
+  const table = $("sep-out");
+  if (!table) return;
+  try {
+    separatePack = await get("/api/separate-scores");
+    renderSeparate();
+  } catch (err) {
+    separatePack = { ready: false, note: err.message };
+    renderSeparate();
   }
 }
 
@@ -700,6 +848,7 @@ async function runStrategy() {
   if (!$("st-k-auto").checked) q.set("matched_k", $("st-k").value);
   try {
     renderStrategy(await get(`/api/strategy?${q}`));
+    loadAttempts();
   } catch (err) {
     renderStrategy({ ready: false, note: err.message });
   }
@@ -723,7 +872,7 @@ function renderTrade(trade) {
     <div class="stat"><div class="k">lift</div><div class="v">${lift}</div></div>
     <div class="stat"><div class="k">time on</div><div class="v">${pct(trade.time_in_alarm)}</div></div>
   </div>
-  <p class="hint">${trade.note} Aimed at ${(trade.share * 100).toFixed(0)}% of old years; later years it was on ${pct(trade.time_in_alarm)}. Threshold ${num(trade.threshold, 3)} (${trade.side} tail) · ${trade.family} · ${trade.n_days} finished weeks.</p>
+  <p class="hint">${trade.note} Aimed at ${(trade.share * 100).toFixed(0)}% of old years; later years it was on ${pct(trade.time_in_alarm)}. Threshold ${num(trade.threshold, 3)} (${trade.side} tail) · ${trade.family} · ${trade.n_days} finished weeks.${trade.saved && trade.saved.n_forecasts ? ` Saved ${trade.saved.n_forecasts} rehearsal forecasts.` : ""}</p>
   ${recent ? `<div class="table-wrap"><table><thead><tr><th>Morning</th><th>Signal</th><th>Next ${trade.horizon_days || 30} days</th></tr></thead><tbody>${recent}</tbody></table></div>` : ""}`;
 }
 
@@ -2535,6 +2684,9 @@ function wireUi() {
   $("st-strategy")?.addEventListener("change", applyStrategyPreset);
   $("st-go")?.addEventListener("click", runStrategy);
   $("st-save")?.addEventListener("click", saveStrategy);
+  ["sep-key", "sep-horizon", "sep-place", "sep-ties"].forEach((id) => {
+    $(id)?.addEventListener("change", renderSeparate);
+  });
   $("brain-go")?.addEventListener("click", retrainBrain);
   $("globe-nz")?.addEventListener("click", lookAtNZ);
   $("globe-earth")?.addEventListener("click", lookAtEarth);

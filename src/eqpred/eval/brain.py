@@ -137,38 +137,64 @@ def _split_name(name: str) -> tuple[str, int]:
     return name, 0
 
 
-def _design(feat: pd.DataFrame, columns: list[str], lags: tuple[int, ...] = BRAIN_LAGS) -> tuple[np.ndarray, list[str]]:
-    parts: list[np.ndarray] = []
+def _design(
+    feat: pd.DataFrame,
+    columns: list[str],
+    lags: tuple[int, ...] = BRAIN_LAGS,
+    dtype: type | np.dtype = float,
+) -> tuple[np.ndarray, list[str]]:
+    """One matrix, filled in place. A second stacked copy is what ran the tape out of memory."""
+    n = len(feat)
+    raws = [(col, feat[col].to_numpy(dtype=dtype, copy=False)) for col in columns if col in feat.columns]
+    width = len(raws) * len(lags)
+    if width == 0:
+        return np.zeros((n, 0), dtype=dtype), []
+    out = np.empty((n, width), dtype=dtype)
     names: list[str] = []
-    for col in columns:
-        raw = feat[col].to_numpy(dtype=float)
+    keep = np.zeros(width, dtype=bool)
+    slot = 0
+    for col, raw in raws:
+        values = np.asarray(raw, dtype=dtype)
         for lag in lags:
-            series = raw if lag <= 0 else np.roll(raw, lag).astype(float)
-            if lag > 0:
-                series = series.copy()
-                series[:lag] = np.nan
+            column = out[:, slot]
+            if lag <= 0:
+                column[:] = values
+            else:
+                column[:lag] = np.nan
+                if lag < n:
+                    column[lag:] = values[:-lag]
             names.append(col if lag == 0 else f"{col}__lag{lag}")
-            parts.append(series)
-    kept_parts = []
-    kept_names = []
-    for name, part in zip(names, parts, strict=True):
-        if np.isfinite(part).any():
-            kept_parts.append(part)
-            kept_names.append(name)
-    if not kept_parts:
-        return np.zeros((len(feat), 0)), []
-    return np.column_stack(kept_parts), kept_names
+            keep[slot] = bool(np.isfinite(column).any())
+            slot += 1
+    kept = np.flatnonzero(keep[:slot])
+    if kept.size == 0:
+        return np.zeros((n, 0), dtype=dtype), []
+    if kept.size != slot:
+        out = out[:, kept]
+    return out, [names[i] for i in kept]
 
 
 def _impute(train_x: np.ndarray, all_x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     if train_x.size == 0:
         return train_x, all_x
     finite_any = np.isfinite(train_x).any(axis=0)
-    med = np.zeros(train_x.shape[1], dtype=float)
+    med = np.zeros(train_x.shape[1], dtype=all_x.dtype)
     if finite_any.any():
-        med[finite_any] = np.nanmedian(train_x[:, finite_any], axis=0)
-    med = np.where(np.isfinite(med), med, 0.0)
-    return np.where(np.isfinite(train_x), train_x, med), np.where(np.isfinite(all_x), all_x, med)
+        cols = np.flatnonzero(finite_any)
+        for start in range(0, cols.size, 64):
+            chosen = cols[start : start + 64]
+            med[chosen] = np.nanmedian(train_x[:, chosen], axis=0)
+    med = np.where(np.isfinite(med), med, np.asarray(0, dtype=all_x.dtype))
+
+    def fill(src: np.ndarray) -> np.ndarray:
+        out = np.empty(src.shape, dtype=src.dtype)
+        for start in range(0, src.shape[1], 128):
+            stop = min(start + 128, src.shape[1])
+            block = src[:, start:stop]
+            out[:, start:stop] = np.where(np.isfinite(block), block, med[start:stop])
+        return out
+
+    return fill(train_x), fill(all_x)
 
 
 def _brier(prob: np.ndarray, hits: np.ndarray) -> float | None:

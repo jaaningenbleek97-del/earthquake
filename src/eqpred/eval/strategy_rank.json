@@ -9,480 +9,750 @@
       "rank": 1
     },
     {
+      "strategy": "idea_rtl_score",
+      "label": "Region-Time-Length quiescence and activation",
+      "mean_later_information_gain": 0.0016,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Sobolev and Tyupkin 1999; Huang 2004",
+      "rank": 2
+    },
+    {
+      "strategy": "idea_natural_time",
+      "label": "Natural time near the critical 0.070",
+      "mean_later_information_gain": 0.0008,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Varotsos, Sarlis and others 2011",
+      "rank": 3
+    },
+    {
+      "strategy": "idea_depth_shift",
+      "label": "Hypocentral depth shallowing into the locked zone",
+      "mean_later_information_gain": 0.0008,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Scholz 2019; Kato and Ben-Zion 2020",
+      "rank": 4
+    },
+    {
       "strategy": "stable_slowslip",
       "label": "Slow slip that held in three eras",
       "mean_later_information_gain": 0.0004,
       "cards": 16,
-      "rank": 2
+      "rank": 5
+    },
+    {
+      "strategy": "idea_spatial_migration",
+      "label": "Epicentral centroid drift and diffusivity",
+      "mean_later_information_gain": 0.0004,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Kato 2012; Brodsky 2011",
+      "rank": 6
+    },
+    {
+      "strategy": "idea_amr_curvature",
+      "label": "Accelerating moment release curvature",
+      "mean_later_information_gain": 0.0003,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Bowman 1998; Hardebeck 2008",
+      "rank": 7
     },
     {
       "strategy": "median_groups",
       "label": "Middle group vote",
       "mean_later_information_gain": 0.0001,
       "cards": 16,
-      "rank": 3
+      "rank": 8
     },
     {
       "strategy": "stable_spf",
       "label": "Polar field that held in three eras",
       "mean_later_information_gain": 0.0001,
       "cards": 16,
-      "rank": 4
+      "rank": 9
     },
     {
       "strategy": "quiet_catalog",
       "label": "Quiet catalog",
       "mean_later_information_gain": 0.0,
       "cards": 16,
-      "rank": 5
+      "rank": 10
     },
     {
       "strategy": "fade",
       "label": "Fade a hot score",
       "mean_later_information_gain": 0.0,
       "cards": 16,
-      "rank": 6
+      "rank": 11
     },
     {
       "strategy": "quiet_decade",
       "label": "Loud call in a quiet stretch",
       "mean_later_information_gain": 0.0,
       "cards": 16,
-      "rank": 7
+      "rank": 12
     },
     {
       "strategy": "climate_rise",
       "label": "Usual rate is climbing",
       "mean_later_information_gain": 0.0,
       "cards": 16,
-      "rank": 8
+      "rank": 13
     },
     {
       "strategy": "stable_alarm",
       "label": "Alarm that held in three eras",
       "mean_later_information_gain": -0.0,
       "cards": 16,
-      "rank": 9
+      "rank": 14
     },
     {
       "strategy": "stable_neutrons",
       "label": "Neutrons that held in three eras",
       "mean_later_information_gain": 0.0,
       "cards": 16,
-      "rank": 10
+      "rank": 15
+    },
+    {
+      "strategy": "idea_moment_balance",
+      "label": "Seismic moment budget deficit and release concentration",
+      "mean_later_information_gain": 0.0,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Ward 1998; moment-deficit studies",
+      "rank": 16
     },
     {
       "strategy": "stable_interface",
       "label": "Interface quakes that held in three eras",
       "mean_later_information_gain": -0.0001,
       "cards": 16,
-      "rank": 11
+      "rank": 17
+    },
+    {
+      "strategy": "idea_stochastic_background",
+      "label": "Stochastic-declustering background probability",
+      "mean_later_information_gain": -0.0001,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Zhuang, Ogata and Vere-Jones 2002",
+      "rank": 18
+    },
+    {
+      "strategy": "idea_inverse_omori",
+      "label": "Inverse-Omori foreshock acceleration",
+      "mean_later_information_gain": -0.0001,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Papazachos 1973; Helmstetter and Sornette 2003",
+      "rank": 19
+    },
+    {
+      "strategy": "idea_m8_tip",
+      "label": "M8 seismic flow and Benioff strain acceleration",
+      "mean_later_information_gain": -0.0002,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Keilis-Borok and Kossobokov 1990",
+      "rank": 20
     },
     {
       "strategy": "hold",
       "label": "Hold the window open",
       "mean_later_information_gain": -0.0003,
       "cards": 16,
-      "rank": 12
+      "rank": 21
     },
     {
       "strategy": "spf_high",
       "label": "Polar field is high",
       "mean_later_information_gain": -0.0003,
       "cards": 16,
-      "rank": 13
+      "rank": 22
+    },
+    {
+      "strategy": "idea_etas_quiet",
+      "label": "Quieter than the aftershock model expects",
+      "mean_later_information_gain": -0.0003,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Ogata 1992",
+      "rank": 23
+    },
+    {
+      "strategy": "idea_polar_wobble",
+      "label": "Chandler polar-motion excitation and wobble torque",
+      "mean_later_information_gain": -0.0003,
+      "cards": 16,
+      "kind": "idea",
+      "source": "IERS EOP 1964-2026; Varga 2012",
+      "rank": 24
     },
     {
       "strategy": "alarm_14_15",
       "label": "14-day alarm, top 15%",
       "mean_later_information_gain": -0.0004,
       "cards": 16,
-      "rank": 14
+      "rank": 25
     },
     {
       "strategy": "accel",
       "label": "Score is speeding up",
       "mean_later_information_gain": -0.0004,
       "cards": 16,
-      "rank": 15
+      "rank": 26
+    },
+    {
+      "strategy": "idea_nowcast_eps",
+      "label": "Nowcasting: small-quake count since the last big shock",
+      "mean_later_information_gain": -0.0004,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Rundle, Turcotte and Holliday 2016",
+      "rank": 27
     },
     {
       "strategy": "pair",
       "label": "Interface and slab",
       "mean_later_information_gain": -0.0006,
       "cards": 16,
-      "rank": 16
+      "rank": 28
     },
     {
       "strategy": "neutron_low",
       "label": "Neutrons are low",
       "mean_later_information_gain": -0.0006,
       "cards": 16,
-      "rank": 17
+      "rank": 29
+    },
+    {
+      "strategy": "idea_bath_gap",
+      "label": "Bath's-law aftershock magnitude gap",
+      "mean_later_information_gain": -0.0007,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Bath 1965; Helmstetter and Sornette 2003",
+      "rank": 30
     },
     {
       "strategy": "alarm_14_50",
       "label": "14-day alarm, top half",
       "mean_later_information_gain": -0.0008,
       "cards": 16,
-      "rank": 18
+      "rank": 31
+    },
+    {
+      "strategy": "idea_quiet_aftershocks",
+      "label": "Aftershocks that died out too fast",
+      "mean_later_information_gain": -0.0008,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Ogata 2001",
+      "rank": 32
+    },
+    {
+      "strategy": "idea_localization",
+      "label": "Small quakes crowd into less space",
+      "mean_later_information_gain": -0.0008,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Ben-Zion and Zaliapin 2020",
+      "rank": 33
+    },
+    {
+      "strategy": "idea_hidden_state",
+      "label": "Hidden active state of the catalog",
+      "mean_later_information_gain": -0.0008,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Poisson hidden Markov model",
+      "rank": 34
     },
     {
       "strategy": "crossing",
       "label": "First crossing",
       "mean_later_information_gain": -0.0009,
       "cards": 16,
-      "rank": 19
+      "rank": 35
     },
     {
       "strategy": "group_spread",
       "label": "Groups disagree",
       "mean_later_information_gain": -0.001,
       "cards": 16,
-      "rank": 20
+      "rank": 36
+    },
+    {
+      "strategy": "idea_fractal_entropy",
+      "label": "Fractal dimension and spatial entropy of epicenters",
+      "mean_later_information_gain": -0.001,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Kiyashchenko 2003; Murase 2003",
+      "rank": 37
+    },
+    {
+      "strategy": "idea_etas_residual",
+      "label": "ETAS transformed-time residual shape",
+      "mean_later_information_gain": -0.001,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Ogata 1988",
+      "rank": 38
+    },
+    {
+      "strategy": "idea_bpositive",
+      "label": "Stress meter: the b-value drops",
+      "mean_later_information_gain": -0.0011,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Gulia and Wiemer 2019; van der Elst 2021",
+      "rank": 39
+    },
+    {
+      "strategy": "idea_rake_regime",
+      "label": "Moment-tensor slip alignment and thrust balance",
+      "mean_later_information_gain": -0.0011,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Global CMT 1976-2026; Wang and Diao 2005",
+      "rank": 40
+    },
+    {
+      "strategy": "idea_pattern_informatics",
+      "label": "Pattern informatics: spatial cells changing rate together",
+      "mean_later_information_gain": -0.0012,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Rundle and Tiampo 2002; Holliday 2005",
+      "rank": 41
     },
     {
       "strategy": "alarm_14_40",
       "label": "14-day alarm, top 40%",
       "mean_later_information_gain": -0.0014,
       "cards": 16,
-      "rank": 21
+      "rank": 42
     },
     {
       "strategy": "cross_lead",
       "label": "Neighbor fault leads",
       "mean_later_information_gain": -0.0014,
       "cards": 16,
-      "rank": 22
+      "rank": 43
     },
     {
       "strategy": "peer_sum",
       "label": "Sum of the other places",
       "mean_later_information_gain": -0.0015,
       "cards": 16,
-      "rank": 23
+      "rank": 44
     },
     {
       "strategy": "crest",
       "label": "Crest only",
       "mean_later_information_gain": -0.0016,
       "cards": 16,
-      "rank": 24
+      "rank": 45
+    },
+    {
+      "strategy": "idea_coalescence",
+      "label": "Small quakes clump into clusters",
+      "mean_later_information_gain": -0.0016,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Ben-Zion and Zaliapin 2020",
+      "rank": 46
+    },
+    {
+      "strategy": "idea_volcano_magmatic",
+      "label": "Volcanic eruption pulse and tectonic coupling",
+      "mean_later_information_gain": -0.0017,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Smithsonian GVP 1964-2026; Linde and Sacks 1998",
+      "rank": 47
+    },
+    {
+      "strategy": "idea_network_graph",
+      "label": "Successive-event network clustering and hubs",
+      "mean_later_information_gain": -0.0017,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Abe and Suzuki 2004; earthquake-network studies",
+      "rank": 48
     },
     {
       "strategy": "solar_high",
       "label": "Sun is loud",
       "mean_later_information_gain": -0.0018,
       "cards": 16,
-      "rank": 25
+      "rank": 49
+    },
+    {
+      "strategy": "idea_tidal",
+      "label": "Tides: big quakes favored when tide stress is high",
+      "mean_later_information_gain": -0.0018,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Ide, Yabe and Tanaka 2016; Yin LURR",
+      "rank": 50
+    },
+    {
+      "strategy": "idea_earth_rotation",
+      "label": "Earth's spin slowed four to six years earlier",
+      "mean_later_information_gain": -0.002,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Bendick and Bilham 2017",
+      "rank": 51
+    },
+    {
+      "strategy": "idea_burstiness",
+      "label": "Interevent burstiness and memory between quakes",
+      "mean_later_information_gain": -0.002,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Goh and Barabasi 2008; Molchan 2005",
+      "rank": 52
     },
     {
       "strategy": "veto",
       "label": "A down group cancels",
       "mean_later_information_gain": -0.0021,
       "cards": 16,
-      "rank": 26
+      "rank": 53
+    },
+    {
+      "strategy": "idea_hedge_expert",
+      "label": "Online expert mixture of all 69 rules, weighted by closed-window skill",
+      "mean_later_information_gain": -0.0021,
+      "cards": 12,
+      "kind": "idea",
+      "source": "Vovk 1990; Cesa-Bianchi 2006",
+      "rank": 54
     },
     {
       "strategy": "online_trust",
       "label": "Trust earned last quarter",
       "mean_later_information_gain": -0.0022,
       "cards": 16,
-      "rank": 27
+      "rank": 55
+    },
+    {
+      "strategy": "idea_reversal_entropy",
+      "label": "Natural-time entropy change under time reversal",
+      "mean_later_information_gain": -0.0022,
+      "cards": 16,
+      "kind": "idea",
+      "source": "Sarlis, Skordas and Varotsos 2018",
+      "rank": 56
     },
     {
       "strategy": "alarm_14_30",
       "label": "14-day alarm, top 30%",
       "mean_later_information_gain": -0.0023,
       "cards": 16,
-      "rank": 28
+      "rank": 57
     },
     {
       "strategy": "jump",
       "label": "Sudden jump",
       "mean_later_information_gain": -0.0027,
       "cards": 16,
-      "rank": 29
+      "rank": 58
     },
     {
       "strategy": "slowslip_high",
       "label": "Slow slip is high",
       "mean_later_information_gain": -0.0038,
       "cards": 16,
-      "rank": 30
+      "rank": 59
     },
     {
       "strategy": "cross_horizon",
       "label": "Short window must agree",
       "mean_later_information_gain": -0.0039,
       "cards": 16,
-      "rank": 31
+      "rank": 60
     },
     {
       "strategy": "believer",
       "label": "Only trust a louder call",
       "mean_later_information_gain": -0.0041,
       "cards": 16,
-      "rank": 32
+      "rank": 61
     },
     {
       "strategy": "alarm_rarity",
       "label": "Alarm plus rarity",
       "mean_later_information_gain": -0.0051,
       "cards": 16,
-      "rank": 33
+      "rank": 62
     },
     {
       "strategy": "markov",
       "label": "Previous window",
       "mean_later_information_gain": -0.0057,
       "cards": 16,
-      "rank": 34
+      "rank": 63
     },
     {
       "strategy": "after_quiet",
       "label": "After a quiet window",
       "mean_later_information_gain": -0.0058,
       "cards": 16,
-      "rank": 35
+      "rank": 64
     },
     {
       "strategy": "residual_alarm",
       "label": "Gap above the usual rate",
       "mean_later_information_gain": -0.0059,
       "cards": 16,
-      "rank": 36
+      "rank": 65
     },
     {
       "strategy": "alarm",
       "label": "Alarm, then size",
       "mean_later_information_gain": -0.006,
       "cards": 16,
-      "rank": 37
+      "rank": 66
     },
     {
       "strategy": "tide_gate",
       "label": "Tide must agree",
       "mean_later_information_gain": -0.006,
       "cards": 16,
-      "rank": 38
+      "rank": 67
     },
     {
       "strategy": "peer_outcome",
       "label": "Neighbor already shook",
       "mean_later_information_gain": -0.0062,
       "cards": 16,
-      "rank": 39
+      "rank": 68
     },
     {
       "strategy": "four_linear",
       "label": "Four old measurements",
       "mean_later_information_gain": -0.0064,
       "cards": 16,
-      "rank": 40
+      "rank": 69
+    },
+    {
+      "strategy": "idea_crowd",
+      "label": "The crowd: every rule already tried, weighted on old years",
+      "mean_later_information_gain": -0.0064,
+      "cards": 12,
+      "kind": "idea",
+      "source": "Stacked ensemble",
+      "rank": 70
     },
     {
       "strategy": "weekday",
       "label": "Weekday",
       "mean_later_information_gain": -0.0071,
       "cards": 16,
-      "rank": 41
+      "rank": 71
     },
     {
       "strategy": "one_group",
       "label": "One best group",
       "mean_later_information_gain": -0.0073,
       "cards": 16,
-      "rank": 42
+      "rank": 72
     },
     {
       "strategy": "trailing_rank",
       "label": "Hot versus its own month",
       "mean_later_information_gain": -0.0074,
       "cards": 16,
-      "rank": 43
+      "rank": 73
     },
     {
       "strategy": "solar_phase",
       "label": "Solar-cycle season",
       "mean_later_information_gain": -0.0074,
       "cards": 16,
-      "rank": 44
+      "rank": 74
     },
     {
       "strategy": "lunar",
       "label": "Lunar phase",
       "mean_later_information_gain": -0.0076,
       "cards": 16,
-      "rank": 45
+      "rank": 75
     },
     {
       "strategy": "stack_hot",
       "label": "Three windows agree",
       "mean_later_information_gain": -0.0085,
       "cards": 16,
-      "rank": 46
+      "rank": 76
     },
     {
       "strategy": "rarity_3_200",
       "label": "3-day rarity",
       "mean_later_information_gain": -0.0098,
       "cards": 16,
-      "rank": 47
+      "rank": 77
     },
     {
       "strategy": "contradict",
       "label": "Model and groups disagree",
       "mean_later_information_gain": -0.0105,
       "cards": 16,
-      "rank": 48
+      "rank": 78
     },
     {
       "strategy": "equity",
       "label": "Only while skill is up",
       "mean_later_information_gain": -0.0107,
       "cards": 16,
-      "rank": 49
+      "rank": 79
     },
     {
       "strategy": "run3",
       "label": "Three loud days",
       "mean_later_information_gain": -0.0114,
       "cards": 16,
-      "rank": 50
+      "rank": 80
     },
     {
       "strategy": "month_rate",
       "label": "Calendar month",
       "mean_later_information_gain": -0.012,
       "cards": 16,
-      "rank": 51
+      "rank": 81
     },
     {
       "strategy": "bin",
       "label": "Bin map",
       "mean_later_information_gain": -0.0123,
       "cards": 16,
-      "rank": 52
+      "rank": 82
     },
     {
       "strategy": "online_decile",
       "label": "Recent score levels",
       "mean_later_information_gain": -0.0138,
       "cards": 16,
-      "rank": 53
+      "rank": 83
     },
     {
       "strategy": "rarity",
       "label": "Rarity sets the rules",
       "mean_later_information_gain": -0.0155,
       "cards": 16,
-      "rank": 54
+      "rank": 84
     },
     {
       "strategy": "shrink",
       "label": "Shrink the move",
       "mean_later_information_gain": -0.0173,
       "cards": 16,
-      "rank": 55
+      "rank": 85
     },
     {
       "strategy": "contrarian",
       "label": "Trust it after a bad year",
       "mean_later_information_gain": -0.0227,
       "cards": 16,
-      "rank": 56
+      "rank": 86
     },
     {
       "strategy": "odds",
       "label": "Odds, not points",
       "mean_later_information_gain": -0.0231,
       "cards": 16,
-      "rank": 57
+      "rank": 87
     },
     {
       "strategy": "two_sided",
       "label": "Both tails",
       "mean_later_information_gain": -0.0255,
       "cards": 16,
-      "rank": 58
+      "rank": 88
     },
     {
       "strategy": "skeptic",
       "label": "Only trust a quieter call",
       "mean_later_information_gain": -0.0293,
       "cards": 16,
-      "rank": 59
+      "rank": 89
     },
     {
       "strategy": "deadzone",
       "label": "Ignore a near miss",
       "mean_later_information_gain": -0.0327,
       "cards": 16,
-      "rank": 60
+      "rank": 90
     },
     {
       "strategy": "stay",
       "label": "Stay home",
       "mean_later_information_gain": -0.0333,
       "cards": 16,
-      "rank": 61
+      "rank": 91
     },
     {
       "strategy": "current",
       "label": "Current card",
       "mean_later_information_gain": -0.0334,
       "cards": 16,
-      "rank": 62
+      "rank": 92
     },
     {
       "strategy": "leftover",
       "label": "Only the leftover",
       "mean_later_information_gain": -0.0334,
       "cards": 16,
-      "rank": 63
+      "rank": 93
     },
     {
       "strategy": "cost3",
       "label": "Misses count triple",
       "mean_later_information_gain": -0.0342,
       "cards": 16,
-      "rank": 64
+      "rank": 94
     },
     {
       "strategy": "pattern8",
       "label": "Eight sign patterns",
       "mean_later_information_gain": -0.0351,
       "cards": 16,
-      "rank": 65
+      "rank": 95
     },
     {
       "strategy": "agree",
       "label": "Agree or stay",
       "mean_later_information_gain": -0.0677,
       "cards": 16,
-      "rank": 66
+      "rank": 96
     },
     {
       "strategy": "earned",
       "label": "Earned cap",
       "mean_later_information_gain": -0.0679,
       "cards": 16,
-      "rank": 67
+      "rank": 97
     },
     {
       "strategy": "compound",
       "label": "Stack the one-day chance",
       "mean_later_information_gain": -0.3169,
       "cards": 16,
-      "rank": 68
+      "rank": 98
     },
     {
       "strategy": "matched",
       "label": "Matched mornings",
       "mean_later_information_gain": -0.5216,
       "cards": 16,
-      "rank": 69
+      "rank": 99
     }
   ],
   "note": "Already tried. Do not score these rules again as if they were new. Add a new name only for a rule that is not on this list."

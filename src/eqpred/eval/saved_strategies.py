@@ -213,7 +213,37 @@ def _predict_region(card_spec: dict[str, Any], built: list[dict[str, Any]], matr
     return pred
 
 
+def shuffle_check(pred: np.ndarray, hits: np.ndarray, climate: np.ndarray, mask: np.ndarray, horizon: int, draws: int = 200) -> dict[str, int] | None:
+    """How often a time-shifted history scores as well as the real one.
+
+    The shift keeps clusters of quakes intact and only breaks their alignment
+    with the card. A card that is really tracking them beats most shifts.
+    """
+    from eqpred.eval.strategy_desk import _gain
+
+    real = _gain(pred, hits, climate, mask)
+    if real is None:
+        return None
+    length = len(hits)
+    if length <= horizon * 2:
+        return None
+    rng = np.random.default_rng(0)
+    beats = 0
+    kept = 0
+    for _ in range(draws):
+        shift = int(rng.integers(horizon, length - horizon))
+        score = _gain(pred, np.roll(hits, shift), climate, mask)
+        if score is None:
+            continue
+        kept += 1
+        beats += int(score < real)
+    if kept < 20:
+        return None
+    return {"beats": beats, "draws": kept}
+
+
 def _tape_end(meta: dict[str, Any]) -> str:
+    return (pd.Timestamp(meta["start"]) + pd.Timedelta(days=int(meta["days"]) - 1)).date().isoformat()
     return (pd.Timestamp(meta["start"]) + pd.Timedelta(days=int(meta["days"]) - 1)).date().isoformat()
 
 
@@ -295,6 +325,7 @@ def score_saved(root: Path | None = None) -> dict[str, Any]:
         prospective = _slice(days, horizon, first_new, None)
         dev = _row(target["region"], target["mag"], pred, target["y"], target["c"], develop, None)
         later = _row(target["region"], target["mag"], pred, target["y"], target["c"], rehearsal, None)
+        later["shuffle"] = shuffle_check(pred, target["y"], target["c"], rehearsal, horizon)
         ahead = _row(target["region"], target["mag"], pred, target["y"], target["c"], prospective, None)
         if ahead["mornings"] >= 8 and ahead["tests_agree"]:
             status = "holding"

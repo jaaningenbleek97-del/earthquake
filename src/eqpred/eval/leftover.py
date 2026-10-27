@@ -217,10 +217,12 @@ def fit_leftover_region(
                 for col in sched_cols
                 if not str(col).split("__lag", 1)[0].lower().startswith("sse_")
             ]
-    sched_x, _sched_names = _design(work, sched_cols, lags=SCHEDULE_LAGS)
-    left_x, left_names = _design(work, left_cols, lags=LEFTOVER_LAGS)
+    sched_x, _sched_names = _design(work, sched_cols, lags=SCHEDULE_LAGS, dtype=np.float32)
+    left_x, left_names = _design(work, left_cols, lags=LEFTOVER_LAGS, dtype=np.float32)
     sched_train, sched_all = _impute(sched_x[train_mask] if sched_x.size else sched_x, sched_x)
+    del sched_x
     left_train, left_all = _impute(left_x[train_mask] if left_x.size else left_x, left_x)
+    del left_x
 
     schedule_p = _logistic_prob(sched_train, hits[train_mask], sched_all, len(hits))
     y_leftover = hits - schedule_p

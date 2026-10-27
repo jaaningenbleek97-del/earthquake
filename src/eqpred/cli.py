@@ -237,6 +237,29 @@ def main(argv: list[str] | None = None) -> int:
     tape.add_argument("--train-end", default="2008-12-31")
     tape.add_argument("--holdout-start", default="2009-01-01")
 
+    catalog = sub.add_parser("catalog-card", help="Score the ETAS plus EEPAS benchmark on answer key version 2; no issued p")
+    catalog.add_argument("--train-end", default="2008-12-31")
+
+    archive = sub.add_parser(
+        "archive-forecasts",
+        help="Save a dated forecast for every strategy already on the desk; no issued p",
+    )
+    archive.add_argument("--horizons", default="3,7,30")
+
+    sub.add_parser(
+        "separate-scores",
+        help="Score each saved strategy on its own place and window length; no issued p",
+    )
+    sub.add_parser(
+        "early-search",
+        help="Choose new variations on years before 2009 and check 2009 once; no issued p",
+    )
+    ideas = sub.add_parser(
+        "idea-bench",
+        help="Score the ten research ideas, chosen on old years and checked on 2009 once; no issued p",
+    )
+    ideas.add_argument("--only", default=None, help="comma-separated idea names")
+
     lab = sub.add_parser("serve", help="Open the local lab UI (ledger, scoreboard, map)")
     lab.add_argument("--host", default="127.0.0.1")
     lab.add_argument("--port", type=int, default=8765)
@@ -1016,6 +1039,72 @@ def main(argv: list[str] | None = None) -> int:
             label_version=args.label,
         )
         print(f"tape {name} (answer key version {args.label}) -> {path}")
+        return 0
+
+    if args.cmd == "catalog-card":
+        from eqpred.eval.catalog_card import run_catalog_card
+
+        report = run_catalog_card(train_end=args.train_end)
+        print(report.get("note", ""))
+        for row in report.get("rows") or []:
+            if int(row.get("horizon_days") or 0) == 30:
+                print(
+                    f"  {row['label']} M{row['target']:g} gain {row.get('information_gain')} "
+                    f"said {row.get('said')} happened {row.get('happened')}"
+                )
+        return 0
+
+    if args.cmd == "separate-scores":
+        from eqpred.eval.separate_scores import build_separate_scores
+
+        report = build_separate_scores()
+        print(
+            f"{report['n_marked_up_happened_more']} cards marked up the windows that happened, "
+            f"out of {report['n_left_the_usual_rate']} that left the usual rate "
+            f"({report['n_cards']} cards in all)"
+        )
+        return 0
+
+    if args.cmd == "early-search":
+        from eqpred.eval.early_search import run_early_search
+
+        report = run_early_search()
+        print(
+            f"tried {report['n_variations']} variations across {report['n_cards']} cards. "
+            f"{report['n_adopted']} were kept from the early years. "
+            f"{report['n_pointed_right']} still pointed the right way after 2009. "
+            f"{report['n_passed']} cleared a gain of 0.01."
+        )
+        return 0
+
+    if args.cmd == "idea-bench":
+        from eqpred.eval.idea_bench import record_in_rank, run_idea_bench
+
+        only = tuple(part.strip() for part in str(args.only).split(",") if part.strip()) if args.only else None
+        report = run_idea_bench(ideas=only)
+        if not report.get("ready"):
+            print(report.get("note", ""))
+            return 1
+        record_in_rank(report)
+        shown = set(only) if only else None
+        for row in report["ideas"]:
+            if shown is not None and row["idea"] not in shown:
+                continue
+            print(
+                f"{row['label']}: kept {row.get('v1_adopted', 0)}+{row.get('v2_adopted', 0)} cards, "
+                f"right way after 2009 {row.get('v1_pointed_right', 0)}+{row.get('v2_pointed_right', 0)}, "
+                f"cleared 0.01 {row.get('v1_passed', 0)}+{row.get('v2_passed', 0)}, "
+                f"mean later gain {row.get('v1_mean_later_gain')} / {row.get('v2_mean_later_gain')}"
+            )
+        return 0
+
+    if args.cmd == "archive-forecasts":
+        from eqpred.eval.strategy_desk import archive_desk_forecasts
+
+        horizons = tuple(int(part) for part in str(args.horizons).split(",") if part.strip())
+        saved = archive_desk_forecasts(horizons=horizons)
+        n = sum(int(row.get("n_forecasts") or 0) for row in saved)
+        print(f"saved {n} rehearsal forecasts across {len(saved)} runs")
         return 0
 
     if args.cmd == "serve":

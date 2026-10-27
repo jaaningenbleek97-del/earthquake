@@ -204,6 +204,28 @@ class LabHandler(SimpleHTTPRequestHandler):
             from eqpred.eval.strategy_desk import DEFAULT_TAPE, TAPE_FOR_LABEL, list_tapes
 
             return self._json({"default": DEFAULT_TAPE, "for_label": TAPE_FOR_LABEL, "tapes": list_tapes()})
+        if path == "/api/catalog-card":
+            from eqpred.eval.catalog_card import load_catalog_card
+
+            pack = load_catalog_card()
+            if pack is None:
+                return self._json({"ready": False, "note": "Run eqpred catalog-card to score this benchmark."})
+            return self._json(pack)
+        if path == "/api/attempts":
+            from eqpred.eval.attempts import list_attempts
+
+            return self._json(list_attempts())
+        if path == "/api/separate-scores":
+            from eqpred.eval.separate_scores import load_separate_scores
+
+            return self._json(load_separate_scores())
+        if path == "/api/idea-bench":
+            from eqpred.eval.idea_bench import load_idea_bench
+
+            pack = load_idea_bench()
+            if pack is None:
+                return self._json({"ready": False, "note": "Run eqpred idea-bench to score the ten ideas."})
+            return self._json({key: pack[key] for key in pack if key != "cards"})
         if path == "/api/saved-strategies":
             from eqpred.eval.saved_strategies import score_saved
 
@@ -215,6 +237,7 @@ class LabHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         if not self._same_origin(post=True):
+            self._drain_body()
             self._error(403, "Changes must come from this lab's own page as JSON.")
             return
         if parsed.path == "/api/saved-strategies":
@@ -222,9 +245,17 @@ class LabHandler(SimpleHTTPRequestHandler):
             return
         trainer = _TRAINERS.get(parsed.path)
         if trainer is not None:
+            self._drain_body()
             self._guarded(lambda: self._json(trainer()))
             return
+        self._drain_body()
         self._error(404, "Unknown path.")
+
+    def _drain_body(self) -> None:
+        # Windows resets the connection, and the client loses the reply, if a request body is left unread.
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 0:
+            self.rfile.read(min(length, 1 << 20))
 
     def _read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)

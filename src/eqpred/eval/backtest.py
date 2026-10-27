@@ -82,6 +82,7 @@ def paper_trade(
     horizon_days: int = 7,
     magnitude_min: float | None = None,
     root: Path | None = None,
+    record: bool = True,
 ) -> dict[str, Any]:
     """Alarm on the train-era tail of one knob. Score closed holdout weeks."""
     if region_id not in REGIONS:
@@ -156,25 +157,40 @@ def paper_trade(
             }
         )
 
-    return _trade_payload(
-        driver=driver,
-        lag_days=int(lag_days),
+    return _remember(
+        _trade_payload(
+            driver=driver,
+            lag_days=int(lag_days),
+            region_id=region_id,
+            region=region,
+            mag=mag,
+            horizon_days=horizon_days,
+            share=share,
+            side=chosen_side,
+            threshold=threshold,
+            train_end=train_end,
+            holdout_start=holdout_start,
+            n_days=n_days,
+            n_trades=n_trades,
+            n_hits=n_wins,
+            hit_rate=win,
+            base_rate=base,
+            recent=recent,
+            extra={"legs": [{"driver": driver, "lag_days": int(lag_days)}]},
+        ),
+        record=record,
+        days=days,
+        entered=entered,
+        hits=hits,
+        train_mask=train_mask,
+        hold_mask=hold_mask,
         region_id=region_id,
         region=region,
         mag=mag,
         horizon_days=horizon_days,
-        share=share,
-        side=chosen_side,
-        threshold=threshold,
-        train_end=train_end,
-        holdout_start=holdout_start,
-        n_days=n_days,
-        n_trades=n_trades,
-        n_hits=n_wins,
-        hit_rate=win,
-        base_rate=base,
-        recent=recent,
-        extra={"legs": [{"driver": driver, "lag_days": int(lag_days)}]},
+        name=driver,
+        knobs={"lag_days": int(lag_days), "share": share, "side": chosen_side},
+        root=root,
     )
 
 
@@ -188,6 +204,7 @@ def paper_trade_combo(
     horizon_days: int = 7,
     magnitude_min: float | None = None,
     root: Path | None = None,
+    record: bool = True,
 ) -> dict[str, Any]:
     """AND of several knob tails. Same closed-week bench as paper_trade."""
     if not legs:
@@ -207,6 +224,7 @@ def paper_trade_combo(
             horizon_days=horizon_days,
             magnitude_min=magnitude_min,
             root=root,
+            record=False,
         )
         labels.append(f"{driver}@{lag}d")
         store = _store(root)
@@ -257,29 +275,116 @@ def paper_trade_combo(
             }
         )
     name = " + ".join(labels)
-    return _trade_payload(
-        driver=name,
-        lag_days=0,
+    train_mask = closed & (days <= utc_ts(train_end))
+    return _remember(
+        _trade_payload(
+            driver=name,
+            lag_days=0,
+            region_id=region_id,
+            region=region,
+            mag=mag,
+            horizon_days=horizon_days,
+            share=share,
+            side="and",
+            threshold=None,
+            train_end=train_end,
+            holdout_start=holdout_start,
+            n_days=n_days,
+            n_trades=n_trades,
+            n_hits=n_wins,
+            hit_rate=win,
+            base_rate=base,
+            recent=recent,
+            extra={
+                "legs": [{"driver": d, "lag_days": int(lag)} for d, lag in legs],
+                "combo": True,
+            },
+        ),
+        record=record,
+        days=days,
+        entered=np.asarray(entered, dtype=bool),
+        hits=hits,
+        train_mask=train_mask,
+        hold_mask=hold_mask,
         region_id=region_id,
         region=region,
         mag=mag,
         horizon_days=horizon_days,
-        share=share,
-        side="and",
-        threshold=None,
-        train_end=train_end,
-        holdout_start=holdout_start,
-        n_days=n_days,
-        n_trades=n_trades,
-        n_hits=n_wins,
-        hit_rate=win,
-        base_rate=base,
-        recent=recent,
-        extra={
-            "legs": [{"driver": d, "lag_days": int(lag)} for d, lag in legs],
-            "combo": True,
-        },
+        name=name,
+        knobs={"share": share, "legs": [{"driver": d, "lag_days": int(lag)} for d, lag in legs]},
+        root=root,
     )
+
+
+def _rate(mask: np.ndarray, hits: np.ndarray) -> float | None:
+    chosen = np.asarray(mask, dtype=bool)
+    if int(chosen.sum()) < 1:
+        return None
+    return float(np.asarray(hits, dtype=float)[chosen].mean())
+
+
+def _remember(
+    payload: dict[str, Any],
+    *,
+    record: bool,
+    days: pd.DatetimeIndex,
+    entered: np.ndarray,
+    hits: np.ndarray,
+    train_mask: np.ndarray,
+    hold_mask: np.ndarray,
+    region_id: str,
+    region: dict,
+    mag: float,
+    horizon_days: int,
+    name: str,
+    knobs: dict[str, Any],
+    root: Path | None,
+) -> dict[str, Any]:
+    """Keep one dated chance per closed window. The live exam is left alone."""
+    if not record:
+        return payload
+    from eqpred.eval.attempts import forecast_frame, save_forecasts
+    from eqpred.eval.honest import week_mask
+
+    y = np.asarray(hits, dtype=float)
+    alarm = np.asarray(entered, dtype=bool)
+    train = np.asarray(train_mask, dtype=bool)
+    usual = _rate(train, y)
+    if usual is None:
+        return payload
+    p_on = _rate(train & alarm, y)
+    p_off = _rate(train & ~alarm, y)
+    p = np.where(alarm, usual if p_on is None else p_on, usual if p_off is None else p_off)
+    weekly = week_mask(np.asarray(hold_mask, dtype=bool), stride=int(horizon_days), fallback=False)
+    frame = forecast_frame(
+        days=days,
+        region=region_id,
+        label=str(region.get("label") or region_id),
+        horizon=int(horizon_days),
+        magnitude=float(mag),
+        p=p,
+        climatology=np.full(len(days), usual),
+        happened=y,
+        mask=weekly,
+        catalog_end=days[-1],
+    )
+    saved = save_forecasts(
+        frame,
+        source="backtest",
+        name=name,
+        label=name,
+        root=root,
+        answer_key="window",
+        knobs=knobs,
+        note=(
+            "Knob replay. The chance is the train-era hit rate on alarm days, "
+            "and the train-era quiet rate on the other days. These hits still include aftershocks. "
+            "This does not change the live exam."
+        ),
+    )
+    out = dict(payload)
+    out["saved"] = {"attempt_id": saved.get("attempt_id"), "n_forecasts": saved.get("n_forecasts") or 0}
+    return out
 
 
 def _trade_payload(

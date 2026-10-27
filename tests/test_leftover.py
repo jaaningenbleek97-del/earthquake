@@ -17,6 +17,21 @@ from eqpred.eval.leftover import (
 from eqpred.paths import data_dir, prediction_dir
 
 
+def test_lagged_design_matches_a_roll_and_impute_fills_gaps():
+    from eqpred.eval.brain import _design, _impute
+
+    feat = pd.DataFrame({"issue_time": pd.date_range("2020-01-01", periods=6, freq="D"), "a": [1.0, np.nan, 3.0, 4.0, 5.0, 6.0]})
+    out, names = _design(feat, ["a"], lags=(0, 2), dtype=np.float32)
+    assert names == ["a", "a__lag2"]
+    assert out.dtype == np.float32
+    assert out[2, 1] == 1.0
+    assert np.isnan(out[1, 1])
+    train = np.array([True, True, True, False, False, False])
+    filled_train, filled_all = _impute(out[train], out)
+    assert filled_all[1, 0] == np.median([1.0, 3.0])
+    assert filled_train.shape[0] == 3
+
+
 def test_runaway_residual_is_clipped_before_it_can_saturate():
     hat = _bound_residual(np.array([-14.7, 0.2, 25.0]))
     assert hat.tolist() == [-1.0, 0.2, 1.0]

@@ -367,7 +367,7 @@
     <section id="strategies" class="panel" role="tabpanel">
       <header class="page-head">
         <h2>Strategy desk</h2>
-        <p>Every rule already scored is on the list below, best first. A new rule should use a new name. 1990–2008 is where a rule is chosen. 2009 onward is the rehearsal, with the chance and the hit rate on that same stretch. The interval is a paired test of that gain. Saving a card freezes it. Only windows that close after the save count as new evidence.</p>
+        <p>Every rule already scored is on the list below, best first. A new rule should use a new name. Every replay, backtest, and new model run now keeps its dated chances, so a later check can score that attempt. Those rows are rehearsal data. They do not change the live exam. 1990–2008 is where a rule is chosen. 2009 onward is the rehearsal, with the chance and the hit rate on that same stretch. The interval is a paired test of that gain. Saving a card freezes it. Only windows that close after the save count as new evidence.</p>
       </header>
 
       <article class="card">
@@ -377,74 +377,104 @@
           <thead><tr><th>Rank</th><th>Rule</th><th>Later years</th></tr></thead>
           <tbody>
             <tr><td>1</td><td>Pair that held from 1990 to 2008</td><td>+0.0020</td></tr>
-            <tr><td>2</td><td>Slow slip that held in three eras</td><td>+0.0004</td></tr>
-            <tr><td>3</td><td>Middle group vote</td><td>+0.0001</td></tr>
-            <tr><td>4</td><td>Polar field that held in three eras</td><td>+0.0001</td></tr>
-            <tr><td>5</td><td>Quiet catalog</td><td>+0.0000</td></tr>
-            <tr><td>6</td><td>Fade a hot score</td><td>+0.0000</td></tr>
-            <tr><td>7</td><td>Loud call in a quiet stretch</td><td>+0.0000</td></tr>
-            <tr><td>8</td><td>Usual rate is climbing</td><td>+0.0000</td></tr>
-            <tr><td>9</td><td>Alarm that held in three eras</td><td>-0.0000</td></tr>
-            <tr><td>10</td><td>Neutrons that held in three eras</td><td>+0.0000</td></tr>
-            <tr><td>11</td><td>Interface quakes that held in three eras</td><td>-0.0001</td></tr>
-            <tr><td>12</td><td>Hold the window open</td><td>-0.0003</td></tr>
-            <tr><td>13</td><td>Polar field is high</td><td>-0.0003</td></tr>
-            <tr><td>14</td><td>14-day alarm, top 15%</td><td>-0.0004</td></tr>
-            <tr><td>15</td><td>Score is speeding up</td><td>-0.0004</td></tr>
-            <tr><td>16</td><td>Interface and slab</td><td>-0.0006</td></tr>
-            <tr><td>17</td><td>Neutrons are low</td><td>-0.0006</td></tr>
-            <tr><td>18</td><td>14-day alarm, top half</td><td>-0.0008</td></tr>
-            <tr><td>19</td><td>First crossing</td><td>-0.0009</td></tr>
-            <tr><td>20</td><td>Groups disagree</td><td>-0.0010</td></tr>
-            <tr><td>21</td><td>14-day alarm, top 40%</td><td>-0.0014</td></tr>
-            <tr><td>22</td><td>Neighbor fault leads</td><td>-0.0014</td></tr>
-            <tr><td>23</td><td>Sum of the other places</td><td>-0.0015</td></tr>
-            <tr><td>24</td><td>Crest only</td><td>-0.0016</td></tr>
-            <tr><td>25</td><td>Sun is loud</td><td>-0.0018</td></tr>
-            <tr><td>26</td><td>A down group cancels</td><td>-0.0021</td></tr>
-            <tr><td>27</td><td>Trust earned last quarter</td><td>-0.0022</td></tr>
-            <tr><td>28</td><td>14-day alarm, top 30%</td><td>-0.0023</td></tr>
-            <tr><td>29</td><td>Sudden jump</td><td>-0.0027</td></tr>
-            <tr><td>30</td><td>Slow slip is high</td><td>-0.0038</td></tr>
-            <tr><td>31</td><td>Short window must agree</td><td>-0.0039</td></tr>
-            <tr><td>32</td><td>Only trust a louder call</td><td>-0.0041</td></tr>
-            <tr><td>33</td><td>Alarm plus rarity</td><td>-0.0051</td></tr>
-            <tr><td>34</td><td>Previous window</td><td>-0.0057</td></tr>
-            <tr><td>35</td><td>After a quiet window</td><td>-0.0058</td></tr>
-            <tr><td>36</td><td>Gap above the usual rate</td><td>-0.0059</td></tr>
-            <tr><td>37</td><td>Alarm, then size</td><td>-0.0060</td></tr>
-            <tr><td>38</td><td>Tide must agree</td><td>-0.0060</td></tr>
-            <tr><td>39</td><td>Neighbor already shook</td><td>-0.0062</td></tr>
-            <tr><td>40</td><td>Four old measurements</td><td>-0.0064</td></tr>
-            <tr><td>41</td><td>Weekday</td><td>-0.0071</td></tr>
-            <tr><td>42</td><td>One best group</td><td>-0.0073</td></tr>
-            <tr><td>43</td><td>Hot versus its own month</td><td>-0.0074</td></tr>
-            <tr><td>44</td><td>Solar-cycle season</td><td>-0.0074</td></tr>
-            <tr><td>45</td><td>Lunar phase</td><td>-0.0076</td></tr>
-            <tr><td>46</td><td>Three windows agree</td><td>-0.0085</td></tr>
-            <tr><td>47</td><td>3-day rarity</td><td>-0.0098</td></tr>
-            <tr><td>48</td><td>Model and groups disagree</td><td>-0.0105</td></tr>
-            <tr><td>49</td><td>Only while skill is up</td><td>-0.0107</td></tr>
-            <tr><td>50</td><td>Three loud days</td><td>-0.0114</td></tr>
-            <tr><td>51</td><td>Calendar month</td><td>-0.0120</td></tr>
-            <tr><td>52</td><td>Bin map</td><td>-0.0123</td></tr>
-            <tr><td>53</td><td>Recent score levels</td><td>-0.0138</td></tr>
-            <tr><td>54</td><td>Rarity sets the rules</td><td>-0.0155</td></tr>
-            <tr><td>55</td><td>Shrink the move</td><td>-0.0173</td></tr>
-            <tr><td>56</td><td>Trust it after a bad year</td><td>-0.0227</td></tr>
-            <tr><td>57</td><td>Odds, not points</td><td>-0.0231</td></tr>
-            <tr><td>58</td><td>Both tails</td><td>-0.0255</td></tr>
-            <tr><td>59</td><td>Only trust a quieter call</td><td>-0.0293</td></tr>
-            <tr><td>60</td><td>Ignore a near miss</td><td>-0.0327</td></tr>
-            <tr><td>61</td><td>Stay home</td><td>-0.0333</td></tr>
-            <tr><td>62</td><td>Current card</td><td>-0.0334</td></tr>
-            <tr><td>63</td><td>Only the leftover</td><td>-0.0334</td></tr>
-            <tr><td>64</td><td>Misses count triple</td><td>-0.0342</td></tr>
-            <tr><td>65</td><td>Eight sign patterns</td><td>-0.0351</td></tr>
-            <tr><td>66</td><td>Agree or stay</td><td>-0.0677</td></tr>
-            <tr><td>67</td><td>Earned cap</td><td>-0.0679</td></tr>
-            <tr><td>68</td><td>Stack the one-day chance</td><td>-0.3169</td></tr>
-            <tr><td>69</td><td>Matched mornings</td><td>-0.5216</td></tr>
+            <tr><td>2</td><td>Region-Time-Length quiescence and activation · new idea</td><td>+0.0016</td></tr>
+            <tr><td>3</td><td>Natural time near the critical 0.070 · new idea</td><td>+0.0008</td></tr>
+            <tr><td>4</td><td>Hypocentral depth shallowing into the locked zone · new idea</td><td>+0.0008</td></tr>
+            <tr><td>5</td><td>Slow slip that held in three eras</td><td>+0.0004</td></tr>
+            <tr><td>6</td><td>Epicentral centroid drift and diffusivity · new idea</td><td>+0.0004</td></tr>
+            <tr><td>7</td><td>Accelerating moment release curvature · new idea</td><td>+0.0003</td></tr>
+            <tr><td>8</td><td>Middle group vote</td><td>+0.0001</td></tr>
+            <tr><td>9</td><td>Polar field that held in three eras</td><td>+0.0001</td></tr>
+            <tr><td>10</td><td>Quiet catalog</td><td>+0.0000</td></tr>
+            <tr><td>11</td><td>Fade a hot score</td><td>+0.0000</td></tr>
+            <tr><td>12</td><td>Loud call in a quiet stretch</td><td>+0.0000</td></tr>
+            <tr><td>13</td><td>Usual rate is climbing</td><td>+0.0000</td></tr>
+            <tr><td>14</td><td>Alarm that held in three eras</td><td>-0.0000</td></tr>
+            <tr><td>15</td><td>Neutrons that held in three eras</td><td>+0.0000</td></tr>
+            <tr><td>16</td><td>Seismic moment budget deficit and release concentration · new idea</td><td>+0.0000</td></tr>
+            <tr><td>17</td><td>Interface quakes that held in three eras</td><td>-0.0001</td></tr>
+            <tr><td>18</td><td>Stochastic-declustering background probability · new idea</td><td>-0.0001</td></tr>
+            <tr><td>19</td><td>Inverse-Omori foreshock acceleration · new idea</td><td>-0.0001</td></tr>
+            <tr><td>20</td><td>M8 seismic flow and Benioff strain acceleration · new idea</td><td>-0.0002</td></tr>
+            <tr><td>21</td><td>Hold the window open</td><td>-0.0003</td></tr>
+            <tr><td>22</td><td>Polar field is high</td><td>-0.0003</td></tr>
+            <tr><td>23</td><td>Quieter than the aftershock model expects · new idea</td><td>-0.0003</td></tr>
+            <tr><td>24</td><td>Chandler polar-motion excitation and wobble torque · new idea</td><td>-0.0003</td></tr>
+            <tr><td>25</td><td>14-day alarm, top 15%</td><td>-0.0004</td></tr>
+            <tr><td>26</td><td>Score is speeding up</td><td>-0.0004</td></tr>
+            <tr><td>27</td><td>Nowcasting: small-quake count since the last big shock · new idea</td><td>-0.0004</td></tr>
+            <tr><td>28</td><td>Interface and slab</td><td>-0.0006</td></tr>
+            <tr><td>29</td><td>Neutrons are low</td><td>-0.0006</td></tr>
+            <tr><td>30</td><td>Bath's-law aftershock magnitude gap · new idea</td><td>-0.0007</td></tr>
+            <tr><td>31</td><td>14-day alarm, top half</td><td>-0.0008</td></tr>
+            <tr><td>32</td><td>Aftershocks that died out too fast · new idea</td><td>-0.0008</td></tr>
+            <tr><td>33</td><td>Small quakes crowd into less space · new idea</td><td>-0.0008</td></tr>
+            <tr><td>34</td><td>Hidden active state of the catalog · new idea</td><td>-0.0008</td></tr>
+            <tr><td>35</td><td>First crossing</td><td>-0.0009</td></tr>
+            <tr><td>36</td><td>Groups disagree</td><td>-0.0010</td></tr>
+            <tr><td>37</td><td>Fractal dimension and spatial entropy of epicenters · new idea</td><td>-0.0010</td></tr>
+            <tr><td>38</td><td>ETAS transformed-time residual shape · new idea</td><td>-0.0010</td></tr>
+            <tr><td>39</td><td>Stress meter: the b-value drops · new idea</td><td>-0.0011</td></tr>
+            <tr><td>40</td><td>Moment-tensor slip alignment and thrust balance · new idea</td><td>-0.0011</td></tr>
+            <tr><td>41</td><td>Pattern informatics: spatial cells changing rate together · new idea</td><td>-0.0012</td></tr>
+            <tr><td>42</td><td>14-day alarm, top 40%</td><td>-0.0014</td></tr>
+            <tr><td>43</td><td>Neighbor fault leads</td><td>-0.0014</td></tr>
+            <tr><td>44</td><td>Sum of the other places</td><td>-0.0015</td></tr>
+            <tr><td>45</td><td>Crest only</td><td>-0.0016</td></tr>
+            <tr><td>46</td><td>Small quakes clump into clusters · new idea</td><td>-0.0016</td></tr>
+            <tr><td>47</td><td>Volcanic eruption pulse and tectonic coupling · new idea</td><td>-0.0017</td></tr>
+            <tr><td>48</td><td>Successive-event network clustering and hubs · new idea</td><td>-0.0017</td></tr>
+            <tr><td>49</td><td>Sun is loud</td><td>-0.0018</td></tr>
+            <tr><td>50</td><td>Tides: big quakes favored when tide stress is high · new idea</td><td>-0.0018</td></tr>
+            <tr><td>51</td><td>Earth's spin slowed four to six years earlier · new idea</td><td>-0.0020</td></tr>
+            <tr><td>52</td><td>Interevent burstiness and memory between quakes · new idea</td><td>-0.0020</td></tr>
+            <tr><td>53</td><td>A down group cancels</td><td>-0.0021</td></tr>
+            <tr><td>54</td><td>Online expert mixture of all 69 rules, weighted by closed-window skill · new idea (12 cards)</td><td>-0.0021</td></tr>
+            <tr><td>55</td><td>Trust earned last quarter</td><td>-0.0022</td></tr>
+            <tr><td>56</td><td>Natural-time entropy change under time reversal · new idea</td><td>-0.0022</td></tr>
+            <tr><td>57</td><td>14-day alarm, top 30%</td><td>-0.0023</td></tr>
+            <tr><td>58</td><td>Sudden jump</td><td>-0.0027</td></tr>
+            <tr><td>59</td><td>Slow slip is high</td><td>-0.0038</td></tr>
+            <tr><td>60</td><td>Short window must agree</td><td>-0.0039</td></tr>
+            <tr><td>61</td><td>Only trust a louder call</td><td>-0.0041</td></tr>
+            <tr><td>62</td><td>Alarm plus rarity</td><td>-0.0051</td></tr>
+            <tr><td>63</td><td>Previous window</td><td>-0.0057</td></tr>
+            <tr><td>64</td><td>After a quiet window</td><td>-0.0058</td></tr>
+            <tr><td>65</td><td>Gap above the usual rate</td><td>-0.0059</td></tr>
+            <tr><td>66</td><td>Alarm, then size</td><td>-0.0060</td></tr>
+            <tr><td>67</td><td>Tide must agree</td><td>-0.0060</td></tr>
+            <tr><td>68</td><td>Neighbor already shook</td><td>-0.0062</td></tr>
+            <tr><td>69</td><td>Four old measurements</td><td>-0.0064</td></tr>
+            <tr><td>70</td><td>The crowd: every rule already tried, weighted on old years · new idea (12 cards)</td><td>-0.0064</td></tr>
+            <tr><td>71</td><td>Weekday</td><td>-0.0071</td></tr>
+            <tr><td>72</td><td>One best group</td><td>-0.0073</td></tr>
+            <tr><td>73</td><td>Hot versus its own month</td><td>-0.0074</td></tr>
+            <tr><td>74</td><td>Solar-cycle season</td><td>-0.0074</td></tr>
+            <tr><td>75</td><td>Lunar phase</td><td>-0.0076</td></tr>
+            <tr><td>76</td><td>Three windows agree</td><td>-0.0085</td></tr>
+            <tr><td>77</td><td>3-day rarity</td><td>-0.0098</td></tr>
+            <tr><td>78</td><td>Model and groups disagree</td><td>-0.0105</td></tr>
+            <tr><td>79</td><td>Only while skill is up</td><td>-0.0107</td></tr>
+            <tr><td>80</td><td>Three loud days</td><td>-0.0114</td></tr>
+            <tr><td>81</td><td>Calendar month</td><td>-0.0120</td></tr>
+            <tr><td>82</td><td>Bin map</td><td>-0.0123</td></tr>
+            <tr><td>83</td><td>Recent score levels</td><td>-0.0138</td></tr>
+            <tr><td>84</td><td>Rarity sets the rules</td><td>-0.0155</td></tr>
+            <tr><td>85</td><td>Shrink the move</td><td>-0.0173</td></tr>
+            <tr><td>86</td><td>Trust it after a bad year</td><td>-0.0227</td></tr>
+            <tr><td>87</td><td>Odds, not points</td><td>-0.0231</td></tr>
+            <tr><td>88</td><td>Both tails</td><td>-0.0255</td></tr>
+            <tr><td>89</td><td>Only trust a quieter call</td><td>-0.0293</td></tr>
+            <tr><td>90</td><td>Ignore a near miss</td><td>-0.0327</td></tr>
+            <tr><td>91</td><td>Stay home</td><td>-0.0333</td></tr>
+            <tr><td>92</td><td>Current card</td><td>-0.0334</td></tr>
+            <tr><td>93</td><td>Only the leftover</td><td>-0.0334</td></tr>
+            <tr><td>94</td><td>Misses count triple</td><td>-0.0342</td></tr>
+            <tr><td>95</td><td>Eight sign patterns</td><td>-0.0351</td></tr>
+            <tr><td>96</td><td>Agree or stay</td><td>-0.0677</td></tr>
+            <tr><td>97</td><td>Earned cap</td><td>-0.0679</td></tr>
+            <tr><td>98</td><td>Stack the one-day chance</td><td>-0.3169</td></tr>
+            <tr><td>99</td><td>Matched mornings</td><td>-0.5216</td></tr>
           </tbody>
         </table></div>
       </article>
@@ -475,74 +505,74 @@
           <label>Rule
             <select id="st-strategy">
               <option value="best_conjunction" selected>1. Pair that held from 1990 to 2008 (+0.0020)</option>
-              <option value="stable_slowslip">2. Slow slip that held in three eras (+0.0004)</option>
-              <option value="median_groups">3. Middle group vote (+0.0001)</option>
-              <option value="stable_spf">4. Polar field that held in three eras (+0.0001)</option>
-              <option value="quiet_catalog">5. Quiet catalog (+0.0000)</option>
-              <option value="fade">6. Fade a hot score (+0.0000)</option>
-              <option value="quiet_decade">7. Loud call in a quiet stretch (+0.0000)</option>
-              <option value="climate_rise">8. Usual rate is climbing (+0.0000)</option>
-              <option value="stable_alarm">9. Alarm that held in three eras (-0.0000)</option>
-              <option value="stable_neutrons">10. Neutrons that held in three eras (+0.0000)</option>
-              <option value="stable_interface">11. Interface quakes that held in three eras (-0.0001)</option>
-              <option value="hold">12. Hold the window open (-0.0003)</option>
-              <option value="spf_high">13. Polar field is high (-0.0003)</option>
-              <option value="alarm_14_15">14. 14-day alarm, top 15% (-0.0004)</option>
-              <option value="accel">15. Score is speeding up (-0.0004)</option>
-              <option value="pair">16. Interface and slab (-0.0006)</option>
-              <option value="neutron_low">17. Neutrons are low (-0.0006)</option>
-              <option value="alarm_14_50">18. 14-day alarm, top half (-0.0008)</option>
-              <option value="crossing">19. First crossing (-0.0009)</option>
-              <option value="group_spread">20. Groups disagree (-0.0010)</option>
-              <option value="alarm_14_40">21. 14-day alarm, top 40% (-0.0014)</option>
-              <option value="cross_lead">22. Neighbor fault leads (-0.0014)</option>
-              <option value="peer_sum">23. Sum of the other places (-0.0015)</option>
-              <option value="crest">24. Crest only (-0.0016)</option>
-              <option value="solar_high">25. Sun is loud (-0.0018)</option>
-              <option value="veto">26. A down group cancels (-0.0021)</option>
-              <option value="online_trust">27. Trust earned last quarter (-0.0022)</option>
-              <option value="alarm_14_30">28. 14-day alarm, top 30% (-0.0023)</option>
-              <option value="jump">29. Sudden jump (-0.0027)</option>
-              <option value="slowslip_high">30. Slow slip is high (-0.0038)</option>
-              <option value="cross_horizon">31. Short window must agree (-0.0039)</option>
-              <option value="believer">32. Only trust a louder call (-0.0041)</option>
-              <option value="alarm_rarity">33. Alarm plus rarity (-0.0051)</option>
-              <option value="markov">34. Previous window (-0.0057)</option>
-              <option value="after_quiet">35. After a quiet window (-0.0058)</option>
-              <option value="residual_alarm">36. Gap above the usual rate (-0.0059)</option>
-              <option value="alarm">37. Alarm, then size (-0.0060)</option>
-              <option value="tide_gate">38. Tide must agree (-0.0060)</option>
-              <option value="peer_outcome">39. Neighbor already shook (-0.0062)</option>
-              <option value="four_linear">40. Four old measurements (-0.0064)</option>
-              <option value="weekday">41. Weekday (-0.0071)</option>
-              <option value="one_group">42. One best group (-0.0073)</option>
-              <option value="trailing_rank">43. Hot versus its own month (-0.0074)</option>
-              <option value="solar_phase">44. Solar-cycle season (-0.0074)</option>
-              <option value="lunar">45. Lunar phase (-0.0076)</option>
-              <option value="stack_hot">46. Three windows agree (-0.0085)</option>
-              <option value="rarity_3_200">47. 3-day rarity (-0.0098)</option>
-              <option value="contradict">48. Model and groups disagree (-0.0105)</option>
-              <option value="equity">49. Only while skill is up (-0.0107)</option>
-              <option value="run3">50. Three loud days (-0.0114)</option>
-              <option value="month_rate">51. Calendar month (-0.0120)</option>
-              <option value="bin">52. Bin map (-0.0123)</option>
-              <option value="online_decile">53. Recent score levels (-0.0138)</option>
-              <option value="rarity">54. Rarity sets the rules (-0.0155)</option>
-              <option value="shrink">55. Shrink the move (-0.0173)</option>
-              <option value="contrarian">56. Trust it after a bad year (-0.0227)</option>
-              <option value="odds">57. Odds, not points (-0.0231)</option>
-              <option value="two_sided">58. Both tails (-0.0255)</option>
-              <option value="skeptic">59. Only trust a quieter call (-0.0293)</option>
-              <option value="deadzone">60. Ignore a near miss (-0.0327)</option>
-              <option value="stay">61. Stay home (-0.0333)</option>
-              <option value="current">62. Current card (-0.0334)</option>
-              <option value="leftover">63. Only the leftover (-0.0334)</option>
-              <option value="cost3">64. Misses count triple (-0.0342)</option>
-              <option value="pattern8">65. Eight sign patterns (-0.0351)</option>
-              <option value="agree">66. Agree or stay (-0.0677)</option>
-              <option value="earned">67. Earned cap (-0.0679)</option>
-              <option value="compound">68. Stack the one-day chance (-0.3169)</option>
-              <option value="matched">69. Matched mornings (-0.5216)</option>
+              <option value="stable_slowslip">5. Slow slip that held in three eras (+0.0004)</option>
+              <option value="median_groups">8. Middle group vote (+0.0001)</option>
+              <option value="stable_spf">9. Polar field that held in three eras (+0.0001)</option>
+              <option value="quiet_catalog">10. Quiet catalog (+0.0000)</option>
+              <option value="fade">11. Fade a hot score (+0.0000)</option>
+              <option value="quiet_decade">12. Loud call in a quiet stretch (+0.0000)</option>
+              <option value="climate_rise">13. Usual rate is climbing (+0.0000)</option>
+              <option value="stable_alarm">14. Alarm that held in three eras (-0.0000)</option>
+              <option value="stable_neutrons">15. Neutrons that held in three eras (+0.0000)</option>
+              <option value="stable_interface">17. Interface quakes that held in three eras (-0.0001)</option>
+              <option value="hold">21. Hold the window open (-0.0003)</option>
+              <option value="spf_high">22. Polar field is high (-0.0003)</option>
+              <option value="alarm_14_15">25. 14-day alarm, top 15% (-0.0004)</option>
+              <option value="accel">26. Score is speeding up (-0.0004)</option>
+              <option value="pair">28. Interface and slab (-0.0006)</option>
+              <option value="neutron_low">29. Neutrons are low (-0.0006)</option>
+              <option value="alarm_14_50">31. 14-day alarm, top half (-0.0008)</option>
+              <option value="crossing">35. First crossing (-0.0009)</option>
+              <option value="group_spread">36. Groups disagree (-0.0010)</option>
+              <option value="alarm_14_40">42. 14-day alarm, top 40% (-0.0014)</option>
+              <option value="cross_lead">43. Neighbor fault leads (-0.0014)</option>
+              <option value="peer_sum">44. Sum of the other places (-0.0015)</option>
+              <option value="crest">45. Crest only (-0.0016)</option>
+              <option value="solar_high">49. Sun is loud (-0.0018)</option>
+              <option value="veto">53. A down group cancels (-0.0021)</option>
+              <option value="online_trust">55. Trust earned last quarter (-0.0022)</option>
+              <option value="alarm_14_30">57. 14-day alarm, top 30% (-0.0023)</option>
+              <option value="jump">58. Sudden jump (-0.0027)</option>
+              <option value="slowslip_high">59. Slow slip is high (-0.0038)</option>
+              <option value="cross_horizon">60. Short window must agree (-0.0039)</option>
+              <option value="believer">61. Only trust a louder call (-0.0041)</option>
+              <option value="alarm_rarity">62. Alarm plus rarity (-0.0051)</option>
+              <option value="markov">63. Previous window (-0.0057)</option>
+              <option value="after_quiet">64. After a quiet window (-0.0058)</option>
+              <option value="residual_alarm">65. Gap above the usual rate (-0.0059)</option>
+              <option value="alarm">66. Alarm, then size (-0.0060)</option>
+              <option value="tide_gate">67. Tide must agree (-0.0060)</option>
+              <option value="peer_outcome">68. Neighbor already shook (-0.0062)</option>
+              <option value="four_linear">69. Four old measurements (-0.0064)</option>
+              <option value="weekday">71. Weekday (-0.0071)</option>
+              <option value="one_group">72. One best group (-0.0073)</option>
+              <option value="trailing_rank">73. Hot versus its own month (-0.0074)</option>
+              <option value="solar_phase">74. Solar-cycle season (-0.0074)</option>
+              <option value="lunar">75. Lunar phase (-0.0076)</option>
+              <option value="stack_hot">76. Three windows agree (-0.0085)</option>
+              <option value="rarity_3_200">77. 3-day rarity (-0.0098)</option>
+              <option value="contradict">78. Model and groups disagree (-0.0105)</option>
+              <option value="equity">79. Only while skill is up (-0.0107)</option>
+              <option value="run3">80. Three loud days (-0.0114)</option>
+              <option value="month_rate">81. Calendar month (-0.0120)</option>
+              <option value="bin">82. Bin map (-0.0123)</option>
+              <option value="online_decile">83. Recent score levels (-0.0138)</option>
+              <option value="rarity">84. Rarity sets the rules (-0.0155)</option>
+              <option value="shrink">85. Shrink the move (-0.0173)</option>
+              <option value="contrarian">86. Trust it after a bad year (-0.0227)</option>
+              <option value="odds">87. Odds, not points (-0.0231)</option>
+              <option value="two_sided">88. Both tails (-0.0255)</option>
+              <option value="skeptic">89. Only trust a quieter call (-0.0293)</option>
+              <option value="deadzone">90. Ignore a near miss (-0.0327)</option>
+              <option value="stay">91. Stay home (-0.0333)</option>
+              <option value="current">92. Current card (-0.0334)</option>
+              <option value="leftover">93. Only the leftover (-0.0334)</option>
+              <option value="cost3">94. Misses count triple (-0.0342)</option>
+              <option value="pattern8">95. Eight sign patterns (-0.0351)</option>
+              <option value="agree">96. Agree or stay (-0.0677)</option>
+              <option value="earned">97. Earned cap (-0.0679)</option>
+              <option value="compound">98. Stack the one-day chance (-0.3169)</option>
+              <option value="matched">99. Matched mornings (-0.5216)</option>
             </select>
           </label>
           <label>Delay, days
@@ -580,9 +610,55 @@
         <div class="table-wrap"><table id="st-out"></table></div>
       </article>
       <article class="card">
+        <h2>Each card on its own</h2>
+        <p class="hint" id="sep-note">Each place and each window length is scored by itself. Marked-up windows have to be the ones that happened. Staying on the usual rate is a tie.</p>
+        <div class="controls">
+          <label>Answer key
+            <select id="sep-key">
+              <option value="fresh.v1">Version 1</option>
+              <option value="fresh.v2">Version 2</option>
+            </select>
+          </label>
+          <label>Window
+            <select id="sep-horizon">
+              <option value="3">3 days</option>
+              <option value="7">7 days</option>
+              <option value="30" selected>30 days</option>
+              <option value="all">All lengths</option>
+            </select>
+          </label>
+          <label>Place
+            <select id="sep-place">
+              <option value="all">All four</option>
+              <option value="global">Earth-wide</option>
+              <option value="hikurangi">Hikurangi</option>
+              <option value="alpine">Alpine Fault</option>
+              <option value="kermadec">Kermadec</option>
+            </select>
+          </label>
+          <label><input id="sep-ties" type="checkbox" /> Show rules that stayed on the usual rate</label>
+        </div>
+        <div class="table-wrap"><table id="sep-out"></table></div>
+      </article>
+      <article class="card">
+        <h2>Research ideas</h2>
+        <p class="hint" id="idea-note">Each idea sets its odds on years before 1990, picks its settings on 1990–2008, and is checked once on 2009 onward, for each place and window length.</p>
+        <div class="table-wrap"><table id="idea-out"></table></div>
+      </article>
+      <article class="card">
+        <h2>Forecast archive</h2>
+        <p class="hint" id="st-attempts-note">Every replay is kept here as dated chances. They are for later scoring. They are not the live exam.</p>
+        <div class="table-wrap"><table id="st-attempts"></table></div>
+      </article>
+      <article class="card">
         <h2>Saved cards</h2>
         <p class="hint" id="st-saved-note">A saved card keeps its knobs. New rules on the desk do not change it. Only windows that close after the save count as new evidence.</p>
         <div class="table-wrap"><table id="st-saved"></table></div>
+      </article>
+      <article class="card">
+        <h2>Catalog benchmark</h2>
+        <p class="hint" id="cat-note">ETAS plus a medium-term addition, on the version 2 answer key. It sits beside the live card and does not replace it.</p>
+        <div class="table-wrap"><table id="cat-out"></table></div>
       </article>
     </section>
 
@@ -730,6 +806,6 @@
 
   <script src="https://unpkg.com/globe.gl@2.41.4/dist/globe.gl.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script src="/app.js?v=earth-v46"></script>
+  <script src="/app.js?v=earth-v51"></script>
 </body>
 </html>

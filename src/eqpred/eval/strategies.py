@@ -219,6 +219,17 @@ def run_strategies(
         fresh_base = float(fresh.mean()) if fresh.size else 0.0
         win = float(n_wins / n_trades) if n_trades else None
         fresh_win = float(n_fresh / n_trades) if n_trades else None
+        _save_rule_forecasts(
+            rule=rule,
+            region=region,
+            quakes=quakes,
+            features=features,
+            days=days,
+            train_mask=train_mask,
+            cut=cut,
+            hold=hold,
+            root=root,
+        )
         reports.append(
             {
                 **asdict(rule),
@@ -243,3 +254,79 @@ def run_strategies(
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(reports, indent=2), encoding="utf-8")
     return reports
+
+
+def _save_rule_forecasts(
+    *,
+    rule: Strategy,
+    region: dict,
+    quakes: pd.DataFrame,
+    features: pd.DataFrame,
+    days: pd.DatetimeIndex,
+    train_mask: np.ndarray,
+    cut: float,
+    hold: pd.Timestamp,
+    root: Path | None,
+) -> None:
+    """One attempt per rule. The chance uses only years before the holdout."""
+    from eqpred.eval.attempts import forecast_frame, save_forecasts
+    from eqpred.eval.honest import week_mask
+    from eqpred.eval.mainshock import fresh_hits, prior_quiet
+
+    full_pq = None
+    if rule.require_prior_quiet:
+        full_pq = prior_quiet(
+            quakes,
+            region,
+            rule.magnitude_min,
+            days,
+            lookback_days=rule.prior_quiet_days,
+        )
+    entered = _entries(features, rule, cut, prior_quiet_mask=full_pq)
+    fresh = fresh_hits(quakes, region, rule.magnitude_min, days, rule.horizon_days).astype(float)
+    train = np.asarray(train_mask, dtype=bool)
+
+    def _rate(mask: np.ndarray) -> float | None:
+        chosen = np.asarray(mask, dtype=bool) & np.isfinite(fresh)
+        if int(chosen.sum()) < 1:
+            return None
+        return float(fresh[chosen].mean())
+
+    usual = _rate(train)
+    if usual is None:
+        return
+    p_on = _rate(train & entered)
+    p_off = _rate(train & ~entered)
+    chance = np.where(entered, usual if p_on is None else p_on, usual if p_off is None else p_off)
+    closed = days + pd.Timedelta(days=rule.horizon_days) <= days[-1]
+    later = np.asarray((days >= hold) & closed)
+    frame = forecast_frame(
+        days=days,
+        region=rule.region_id,
+        label=rule.label,
+        horizon=rule.horizon_days,
+        magnitude=rule.magnitude_min,
+        p=chance,
+        climatology=np.full(len(days), usual),
+        happened=fresh,
+        mask=week_mask(later, stride=rule.horizon_days, fallback=False),
+        catalog_end=days[-1],
+    )
+    save_forecasts(
+        frame,
+        source="rulebook",
+        name=rule.strategy_id,
+        label=rule.label,
+        root=root,
+        label_version=1,
+        answer_key="fresh.v1",
+        knobs={
+            "horizon_days": rule.horizon_days,
+            "magnitude_min": rule.magnitude_min,
+            "require_quiet": rule.require_quiet,
+        },
+        note=(
+            f"Rule-book replay of {rule.label}. "
+            "The chance is the train-era first-shock rate. This does not change the live exam."
+        ),
+    )

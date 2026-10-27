@@ -1,6 +1,7 @@
 """Fast replays of scoring rules. The heavy model is saved once. Knobs stay cheap."""
 from __future__ import annotations
 
+import gc
 import json
 import os
 from pathlib import Path
@@ -497,6 +498,8 @@ def _row(region: str, mag: float, pred: np.ndarray, hits: np.ndarray, climate: n
         "card_mean": None if not m.any() else round(float(pred[m].mean()), 4),
         "usual_mean": None if not m.any() else round(float(climate[m].mean()), 4),
         "happened": None if not m.any() else round(float(hits[m].mean()), 4),
+        "n_above": int(above.sum()),
+        "n_below": int(below.sum()),
         "above": None if int(above.sum()) < 8 else round(float(hits[above].mean()), 4),
         "below": None if int(below.sum()) < 8 else round(float(hits[below].mean()), 4),
     }
@@ -621,6 +624,7 @@ def score_strategy(
         new_moon = pd.Timestamp("2000-01-06", tz="UTC")
         lunar = np.floor(np.mod((days - new_moon).days, 29.530588853) / 29.530588853 * 8).astype(int)
     else:
+        days = None
         dow = None
         lunar = None
         year = None
@@ -656,6 +660,7 @@ def score_strategy(
                 card["same_mag"] = True
                 break
     rows = []
+    forecast_parts = []
     for card in cards:
         model = card["live"] if use_readings else card["model"]
         pred, check = _predict(
@@ -672,6 +677,26 @@ def score_strategy(
             matched_k,
             lag_days,
         )
+        if days is not None:
+            from eqpred.eval.attempts import forecast_frame
+
+            keep = np.array(full_mask, copy=True)
+            if horizon > 0 and np.isfinite(pred[-1]):
+                keep[-1] = True
+            forecast_parts.append(
+                forecast_frame(
+                    days=days,
+                    region=card["region"],
+                    label=LABELS.get(card["region"], card["region"]),
+                    horizon=horizon,
+                    magnitude=float(card["mag"]),
+                    p=pred,
+                    climatology=card["c"],
+                    happened=card["y"],
+                    mask=keep,
+                    catalog_end=days[-1],
+                )
+            )
         row = _row(card["region"], card["mag"], pred, card["y"], card["c"], exam, check)
         develop = _row(card["region"], card["mag"], pred, card["y"], card["c"], _develop_mask(meta, horizon), None)
         row["develop_information_gain"] = develop["information_gain"]
@@ -688,10 +713,39 @@ def score_strategy(
         row["full_mornings"] = whole["mornings"]
         rows.append(row)
     label = dict(STRATEGIES)[strategy]
+    version = int(meta.get("label_version") or 1)
+    saved = _save_replay(
+        forecast_parts,
+        strategy=strategy,
+        label=label,
+        version=version,
+        tape_name=tape["requested_name"],
+        knobs={
+            "shrink": chosen_shrink,
+            "odds": chosen_odds,
+            "alarm_share": alarm_share,
+            "rarity_n0": rarity_n0,
+            "bins": bins,
+            "agree_min": agree_min,
+            "matched_k": matched_k,
+            "use_readings": use_readings,
+            "lag_days": lag_days,
+            "kind": kind,
+            "horizon_days": horizon,
+        },
+        root=root,
+    )
+    saved_sentence = ""
+    if saved.get("n_forecasts"):
+        saved_sentence = (
+            f" Saved {saved['n_forecasts']} rehearsal forecasts as {saved['attempt_id']}."
+            " They do not change the live exam."
+        )
     return {
         "ready": True,
         "strategy": strategy,
         "label": label,
+        "saved": saved,
         "horizon_days": horizon,
         "choices": {
             "shrink": chosen_shrink,
@@ -713,12 +767,86 @@ def score_strategy(
             "fit_hash": meta.get("fit_hash"),
         },
         "note": (
-            f"Answer key version {int(meta.get('label_version') or 1)}. "
+            f"Answer key version {version}. "
             f"Tape starts {meta.get('start', '1990')}. Check years sit inside the fit, through {meta.get('train_end', '2018')}. "
             "Later years are the held-out mornings. Full record is every closed window from the start of the tape. "
             "A named 14-day alarm or 3-day rarity keeps its own knobs."
+            + saved_sentence
         ),
     }
+
+
+def _save_replay(
+    parts: list[pd.DataFrame],
+    *,
+    strategy: str,
+    label: str,
+    version: int,
+    tape_name: str,
+    knobs: dict[str, Any],
+    root: Path | None,
+) -> dict[str, Any]:
+    from eqpred.eval.attempts import save_forecasts
+
+    frame = pd.concat([part for part in parts if part is not None and len(part)], ignore_index=True) if parts else None
+    if frame is None or len(frame) == 0:
+        return {"n_forecasts": 0, "attempt_id": None, "writes_issued_p": False}
+    return save_forecasts(
+        frame,
+        source="strategy",
+        name=strategy,
+        label=label,
+        root=root,
+        label_version=version,
+        tape=tape_name,
+        knobs=knobs,
+        answer_key=f"fresh.v{version}",
+        note=(
+            "Strategy replay. Each row is one dated chance. "
+            "Closed windows can be scored later. This does not change the live exam."
+        ),
+    )
+
+
+def archive_desk_forecasts(
+    root: Path | None = None,
+    horizons: tuple[int, ...] = (3, 7, 30),
+    tapes: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Save a forecast row for every rule already on the desk. Does not re-rank them."""
+    names = list(tapes) if tapes else [TAPE_FOR_LABEL[1], TAPE_FOR_LABEL[2]]
+    saved: list[dict[str, Any]] = []
+    for tape_name in names:
+        if load_tape(root, name=tape_name) is None:
+            print(f"skip {tape_name}: tape is not built", flush=True)
+            continue
+        for horizon in horizons:
+            for strategy, label in STRATEGIES:
+                print(f"archive {tape_name} {horizon}d {strategy}", flush=True)
+                try:
+                    report = score_strategy(
+                        horizon=int(horizon),
+                        region="all",
+                        strategy=strategy,
+                        root=root,
+                        tape_name=tape_name,
+                    )
+                except (ValueError, KeyError, OSError) as exc:
+                    print(f"skip {strategy}: {exc}", flush=True)
+                    continue
+                item = report.get("saved") or {}
+                saved.append(
+                    {
+                        "strategy": strategy,
+                        "label": label,
+                        "horizon_days": int(horizon),
+                        "tape": tape_name,
+                        "n_forecasts": item.get("n_forecasts") or 0,
+                        "attempt_id": item.get("attempt_id"),
+                        "ready": bool(report.get("ready")),
+                    }
+                )
+    return saved
 
 
 def _develop_mask(meta: dict[str, Any], horizon: int) -> np.ndarray:
@@ -875,6 +1003,8 @@ def _build_tape(root: Path | None, train_end: str, holdout_start: str, name: str
             meta["horizons"][str(horizon)]["groups"][rid] = names
             for i, group_name in enumerate(names):
                 arrays[f"{horizon}_{rid}_g{i}"] = np.asarray(block["groups"][group_name], dtype=np.float32)
+        del shared, series
+        gc.collect()
     meta["label_version"] = label_version
     meta["built_at"] = pd.Timestamp.now(tz="UTC").isoformat()
     meta["fit_hash"] = fit_fingerprint(arrays, meta)
