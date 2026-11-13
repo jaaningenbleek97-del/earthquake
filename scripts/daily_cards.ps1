@@ -25,13 +25,14 @@ function Invoke-Step([string]$Name, [string[]]$Arguments) {
     return $code
 }
 
+# Allow a stale installation to recover before enforcing the issue gate.
+Invoke-Step "ingest core feeds" @("ingest", "--wave", "1", "--start", $start, "--end", $end) | Out-Null
+Invoke-Step "ingest GeoNet catalog" @("ingest", "--wave", "2", "--only", "geonet.fdsn", "--start", $start, "--end", $end) | Out-Null
 if ((Invoke-Step "watchdog" @("watchdog")) -ne 0) {
     "required feeds are stale, so no new card was written" | Out-File -FilePath $log -Append -Encoding utf8
     exit 2
 }
-Invoke-Step "ingest core feeds" @("ingest", "--wave", "1", "--start", $start, "--end", $end) | Out-Null
-Invoke-Step "ingest GeoNet catalog" @("ingest", "--wave", "2", "--only", "geonet.fdsn", "--start", $start, "--end", $end) | Out-Null
 if ((Invoke-Step "features" @("features")) -ne 0) { exit 1 }
 if ((Invoke-Step "mainshock" @("mainshock")) -ne 0) { exit 1 }
-Invoke-Step "predict today" @("predict", "--start", $today, "--end", $end) | Out-Null
+if ((Invoke-Step "predict today" @("predict", "--start", $today, "--end", $end)) -ne 0) { exit 1 }
 exit 0

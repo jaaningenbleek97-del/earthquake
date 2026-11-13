@@ -282,6 +282,8 @@ def issue_predictions(
             climate = float(pack["climatology_p"])
             why = [str(c.get("label") or c.get("driver") or "") for c in (pack.get("connections") or []) if c]
             why_txt = ", ".join(bit for bit in why[:4] if bit) or "the fresh-shock mix"
+            if any(c.get("attribution_kind") == "shared_encoder_coefficient" for c in (pack.get("connections") or [])):
+                why_txt = "shared encoder weights (not local probability contributions): " + why_txt
             cards.append(
                 prediction(
                     prediction_id=f"{issued.date()}-{region_id}-m{mag:g}-{uuid4().hex[:8]}",

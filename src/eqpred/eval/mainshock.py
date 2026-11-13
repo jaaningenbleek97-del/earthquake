@@ -1948,6 +1948,35 @@ def _lift_onto_rate(
     return np.clip(foil + (np.asarray(similar, dtype=float) - base), 1e-6, 1.0 - 1e-6)
 
 
+def _encoder_connections(encoder, names: list[str]) -> list[dict[str, Any]]:
+    """Global shared-encoder weights, not local probability contributions.
+
+    Input order is not importance: a first-ten slice advertised early CME lags
+    with dummy weights on every box. This diagnostic never changes issued p.
+    """
+    weights = np.asarray(encoder.named_steps["lr"].coef_, dtype=float).reshape(-1)
+    # BlankAwareScaler appends one missing-reading flag per original column.
+    if weights.size == 2 * len(names):
+        names = list(names) + ["missing__" + name for name in names]
+    if weights.size != len(names):
+        raise ValueError("encoder coefficient/feature count mismatch")
+    order = sorted(
+        (i for i, w in enumerate(weights) if np.isfinite(w) and w != 0.0),
+        key=lambda i: (-abs(weights[i]), names[i]),
+    )[:10]
+    return [
+        {
+            "feature": names[i],
+            "driver": names[i].split("__lag")[0],
+            "lag_days": 0 if "__lag" not in names[i] else int(names[i].rsplit("__lag", 1)[1]),
+            "label": _driver_plain(names[i]),
+            "importance": float(weights[i]),
+            "attribution_kind": "shared_encoder_coefficient",
+        }
+        for i in order
+    ]
+
+
 def _fit_shared_stack(
     *,
     feat: pd.DataFrame,
@@ -1990,16 +2019,6 @@ def _fit_shared_stack(
         f"added {added} useful signals",
         flush=True,
     )
-    stack_conn = [
-        {
-            "feature": stack_names[i],
-            "driver": stack_names[i].split("__lag")[0],
-            "lag_days": 0 if "__lag" not in stack_names[i] else int(stack_names[i].rsplit("__lag", 1)[1]),
-            "label": _driver_plain(stack_names[i]),
-            "importance": 1.0,
-        }
-        for i in range(min(10, len(stack_names)))
-    ]
     rate_conn = [
         {
             "feature": "rate_roll",
@@ -2041,6 +2060,7 @@ def _fit_shared_stack(
         z = _proba(encoder, stack)
     except ValueError:
         return _climate_fallback()
+    stack_conn = _encoder_connections(encoder, stack_names)
     fams = "+".join(families) if families else "none"
     out: dict[str, np.ndarray] = {}
     recipes: dict[str, str] = {}

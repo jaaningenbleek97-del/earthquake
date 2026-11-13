@@ -67,6 +67,8 @@ IDEAS = (
     ("etas_residual", "ETAS transformed-time residual shape", "Ogata 1988"),
     ("network_graph", "Successive-event network clustering and hubs", "Abe and Suzuki 2004; earthquake-network studies"),
     ("bath_gap", "Bath's-law aftershock magnitude gap", "Bath 1965; Helmstetter and Sornette 2003"),
+    ("southward_bz", "Southward IMF (Bz) strength/duration/integral/gated variants", "Davidson ACE/DSCOVR; Cataldi/Straser; swept 68 variants 2026-11 — negative"),
+    ("southward_bz_storm_state", "Southward-Bz onset as storm-state trigger (dBz/dt, sudden commencement, substorm/AE, coupling gating, lead-lag)", "Dungey reconnection; swept 24 variants 2026-11 — negative"),
     ("stochastic_background", "Stochastic-declustering background probability", "Zhuang, Ogata and Vere-Jones 2002"),
     ("moment_balance", "Seismic moment budget deficit and release concentration", "Ward 1998; moment-deficit studies"),
     ("inverse_omori", "Inverse-Omori foreshock acceleration", "Papazachos 1973; Helmstetter and Sornette 2003"),
